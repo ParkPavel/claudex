@@ -1,0 +1,180 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, runtimeDigest, snapshot, withLock } from './io.mjs';
+import { prepareAdapter, readyEvent, resultEvent, validatePacket, validateResult } from './adapters.mjs';
+import { spawnSpec, stopTree } from './process.mjs';
+import { checkEntrypoints } from './workspace.mjs';
+
+export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
+export function jobFile(ws, id) {
+  assert(/^[a-zA-Z0-9_-]+$/.test(id), 'Invalid job ID');
+  return path.join(ws.state,'jobs',`${id}.json`);
+}
+export async function listJobs(ws) {
+  const dir = path.join(ws.state,'jobs');
+  if (!(await exists(dir))) return [];
+  return Promise.all((await fs.readdir(dir)).filter(f => f.endsWith('.json')).map(f => readJSON(path.join(dir,f))));
+}
+export async function inspectJobs(ws,id) {
+  const jobs=id ? [await readJSON(jobFile(ws,id))] : await listJobs(ws);
+  const digest=await runtimeDigest(ws);
+  const snapshots=new Map();
+  for(const job of jobs) {
+    if(job.status!=='COMPLETED')continue;
+    try {
+      const repo=job.packet.worktree ? await contained(ws.root,path.resolve(ws.root,job.packet.worktree)) : ws.project;
+      if(!snapshots.has(repo))snapshots.set(repo,await snapshot(repo));
+      if(job.configurationDigest!==digest || job.after?.digest!==snapshots.get(repo).digest)job.evidenceFreshness='STALE';
+    } catch { job.evidenceFreshness='UNVERIFIED'; }
+  }
+  return id ? jobs[0] : jobs;
+}
+export async function submit(ws, packet, { start = true } = {}) {
+  await validatePacket(packet);
+  const id = `${packet.taskId}-${crypto.randomUUID()}`;
+  const job = { id, taskId: packet.taskId, packet, status: 'QUEUED', created: new Date().toISOString(), workerPid: null, childPid: null, acceptance: 'UNKNOWN', evidenceFreshness: 'UNVERIFIED' };
+  await withLock(ws.state, async () => {
+    const jobs = await listJobs(ws);
+    assert(!jobs.some(j => j.taskId === packet.taskId && !TERMINAL.has(j.status)), 'Task already has an active job');
+    await atomicJSON(jobFile(ws,id),job);
+  });
+  if (start) {
+    const child = spawn(process.execPath,[path.join(ROOT,'bin/claudex.mjs'),'worker',id,'--workspace',ws.root],{ cwd: ws.root, detached: true, windowsHide: true, stdio: 'ignore' });
+    await new Promise((resolve,reject) => { child.once('spawn',resolve); child.once('error',reject); });
+    child.unref();
+  }
+  return { jobId: id, status: job.status };
+}
+export async function cancel(ws, id) {
+  const job = await readJSON(jobFile(ws,id));
+  if (TERMINAL.has(job.status)) return { jobId:id, status:job.status };
+  await fs.writeFile(path.join(ws.state,'jobs',`${id}.cancel`),'cancel\n',{ mode:0o600 });
+  return { jobId:id, status:'CANCELLATION_REQUESTED' };
+}
+export async function runWorker(ws,id) {
+  const file = jobFile(ws,id);
+  const job = await readJSON(file);
+  const packet = job.packet;
+  const cancellation = path.join(ws.state,'jobs',`${id}.cancel`);
+  const save = async (status, extra = {}) => {
+    Object.assign(job,extra,{ status, updated:new Date().toISOString() });
+    await atomicJSON(file,job);
+  };
+  const artifactDir = path.join(ws.state,'artifacts',id);
+  let child;
+  let claimed = false;
+  try {
+    const role = await validatePacket(packet);
+    // A worker owns its own job record after claiming it under the common coordinator lock.
+    const queueDeadline = Date.now() + ws.config.runTimeoutMs;
+    while (!claimed) {
+      await withLock(ws.state,async () => {
+        const current = await readJSON(file);
+        assert(current.status === 'QUEUED', 'Job already claimed or terminal');
+        if (await exists(cancellation)) { await save('CANCELLED'); return; }
+        const running = (await listJobs(ws)).filter(j => ['PREFLIGHT','STARTING','READY','RUNNING'].includes(j.status));
+        if (running.length >= ws.config.maxWorkers) return;
+        await save('PREFLIGHT',{ workerPid:process.pid });
+        claimed = true;
+      });
+      if (job.status === 'CANCELLED') return;
+      if (!claimed) { assert(Date.now() < queueDeadline,'Queue deadline exceeded'); await new Promise(r=>setTimeout(r,250)); }
+    }
+    assert((await checkEntrypoints(ws)).length === 0,'Generated entrypoints drifted; run doctor');
+    let repo = ws.project;
+    if (packet.worktree) {
+      repo = await contained(ws.root,path.resolve(ws.root,packet.worktree));
+      const common = (await git(repo,['rev-parse','--path-format=absolute','--git-common-dir'])).trim();
+      const expected = (await git(ws.project,['rev-parse','--path-format=absolute','--git-common-dir'])).trim();
+      assert(path.resolve(common) === path.resolve(expected),'Worktree belongs to another repository');
+    }
+    if (packet.authority === 'workspace-write') {
+      assert(repo !== ws.project,'Writer must use a separate worktree');
+      const branch = (await git(repo,['branch','--show-current'])).trim();
+      assert(branch && !['main','master'].includes(branch),'Writer requires a feature branch');
+      assert(!(await listJobs(ws)).some(j=>j.id !== id && !TERMINAL.has(j.status) && j.packet.worktree === packet.worktree && j.packet.authority === 'workspace-write'),'Another writer owns this worktree');
+    }
+    for (const rel of packet.paths) {
+      assert(!path.isAbsolute(rel),'Scope paths must be relative');
+      await contained(repo,path.resolve(repo,rel));
+    }
+    const profile = await readJSON(path.join(ROOT,'profiles',`${ws.config.profile}.json`));
+    for (const required of profile.requiredFiles) assert(await exists(path.join(repo,required)),`Missing project file ${required}`);
+    if (packet.base) job.base = (await git(repo,['rev-parse','--verify',`${packet.base}^{commit}`])).trim();
+    if (packet.mode === 'diff') assert((await git(repo,['diff','--name-only',job.base])).trim(),'Diff review has no changes');
+    job.before = await snapshot(repo);
+    job.configurationDigest = await runtimeDigest(ws);
+    const adapter = await prepareAdapter(ws,packet,role);
+    job.runtime = { provider:adapter.provider, executable:adapter.spec.identity, version:adapter.version, model:adapter.model, effort:adapter.effort, authority:packet.authority };
+    const localProfile = path.join(ws.state,'project-profile.md');
+    let prompt = `${await fs.readFile(path.join(ROOT,'config/core.md'),'utf8')}\n\nRole: ${packet.role}\n${role.purpose}\n\nProject profile:\n${profile.instructions}\n`;
+    if (await exists(localProfile)) prompt += await fs.readFile(localProfile,'utf8');
+    for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
+    prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
+    await fs.mkdir(artifactDir,{recursive:true});
+    await fs.writeFile(path.join(artifactDir,'packet.json'),JSON.stringify(packet,null,2),{flag:'wx',mode:0o600});
+    await save('STARTING');
+    child = spawnSpec(adapter.spec,adapter.args,repo);
+    job.childPid = child.pid;
+    await save('STARTING');
+    let ready = false, result = null, parseError = null, stdout = '', stderr = '', buffer = '', stopped = null;
+    const started = Date.now();
+    const maximumOutput = 16 * 1024 * 1024;
+    child.stdout.on('data',chunk => {
+      stdout += chunk.toString(); buffer += chunk.toString();
+      if (stdout.length > maximumOutput) { stopped = 'FAILED'; void stopTree(child); return; }
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0,newline); buffer = buffer.slice(newline+1);
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (readyEvent(event,adapter.provider)) {
+            ready = true;
+            if(event.model)job.runtime.resolvedModel=event.model;
+          }
+          const answer = resultEvent(event,adapter.provider);
+          if (answer) result = answer;
+        } catch (e) { parseError = e.message; }
+      }
+    });
+    child.stderr.on('data',chunk => { if (stderr.length < maximumOutput) stderr += chunk.toString(); });
+    let heartbeatBusy = false;
+    const interval = setInterval(async () => {
+      if (heartbeatBusy) return;
+      heartbeatBusy = true;
+      try {
+        if (await exists(cancellation)) stopped = 'CANCELLED';
+        if ((!ready && Date.now()-started > ws.config.readyTimeoutMs) || Date.now()-started > ws.config.runTimeoutMs) stopped = 'TIMED_OUT';
+        if (stopped) await stopTree(child);
+        else if (ready && job.status === 'STARTING') await save('RUNNING',{readyAt:new Date().toISOString()});
+      } catch { stopped = 'FAILED'; await stopTree(child); }
+      finally { heartbeatBusy = false; }
+    },250);
+    const exit = await new Promise((resolve,reject) => { child.once('error',reject); child.once('close',(code,signal)=>resolve({code,signal})); child.stdin.on('error',()=>{}); child.stdin.end(prompt); }).finally(()=>clearInterval(interval));
+    while (heartbeatBusy) await new Promise(r=>setTimeout(r,10));
+    await fs.writeFile(path.join(artifactDir,'events.jsonl'),stdout,{flag:'wx',mode:0o600});
+    await fs.writeFile(path.join(artifactDir,'stderr.log'),stderr,{flag:'wx',mode:0o600});
+    job.after = await snapshot(repo);
+    const configurationCurrent = job.configurationDigest === await runtimeDigest(ws);
+    job.evidenceFreshness = configurationCurrent && (packet.authority === 'workspace-write' || job.before.digest === job.after.digest) ? 'CURRENT' : 'STALE';
+    if (stopped) { await save(stopped,{exit}); return; }
+    assert(exit.code === 0,`Worker exited unsuccessfully (${exit.code}); inspect local artifacts`);
+    assert(ready,'No provider readiness event received');
+    assert(result,`No structured result received${parseError ? '; inspect local event stream' : ''}`);
+    validateResult(result,packet);
+    await fs.writeFile(path.join(artifactDir,'result.json'),JSON.stringify(result,null,2),{flag:'wx',mode:0o600});
+    // A model verdict is a proposal. An independent acceptance record remains mandatory.
+    job.proposedAcceptance = result.criteria.some(c=>c.status==='FAIL') ? 'FAIL' : result.criteria.some(c=>c.status==='UNKNOWN') ? 'UNKNOWN' : 'PASS';
+    await save('COMPLETED',{exit,acceptance:'UNKNOWN',artifactDirectory:artifactDir});
+  } catch (error) {
+    if (child) await stopTree(child);
+    if (!claimed) {
+      const current = await readJSON(file);
+      if (current.status !== 'QUEUED') return;
+    }
+    await save('FAILED',{error:error.message,acceptance:'UNKNOWN'});
+  }
+}

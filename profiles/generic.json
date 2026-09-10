@@ -1,0 +1,6 @@
+{
+  "name": "generic",
+  "instructions": "Use the project's own documentation and test commands. Preserve unrelated work. Define acceptance before implementation.",
+  "requiredFiles": [],
+  "checks": []
+}

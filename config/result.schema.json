@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "criteria", "findings", "unknowns"],
+  "properties": {
+    "taskId": { "type": "string" },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "status", "evidence"],
+        "properties": { "id": { "type": "string" }, "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] }, "evidence": { "type": "array", "items": { "type": "string" } } }
+      }
+    },
+    "findings": { "type": "array", "items": { "type": "string" } },
+    "unknowns": { "type": "array", "items": { "type": "string" } }
+  }
+}

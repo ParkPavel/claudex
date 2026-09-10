@@ -1,0 +1,10 @@
+{
+  "name": "obsidian",
+  "instructions": "Develop against the declared Obsidian plugin API and framework versions. Require a root manifest.json. Separate source inspection, build checks and live acceptance. Use an explicitly configured test vault through Obsidian CLI. A screenshot cannot prove persistence; read state back after reload when persistence is the criterion. Never infer plugin data schemas from Obsidian Bases. Read project-specific invariants from the local profile.",
+  "requiredFiles": ["manifest.json", "package.json"],
+  "checks": [
+    { "command": "npm", "args": ["run", "build"] },
+    { "command": "npm", "args": ["test", "--", "--runInBand"] },
+    { "command": "npm", "args": ["run", "lint"] }
+  ]
+}

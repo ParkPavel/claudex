@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node "$(git rev-parse --show-toplevel)/bin/claudex.mjs" guard push --repo "$(git rev-parse --show-toplevel)" --remote "$1" --url "$2"

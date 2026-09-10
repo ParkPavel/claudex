@@ -1,0 +1,21 @@
+{
+  "name": "claudex",
+  "version": "0.1.0",
+  "description": "A shared workspace harness for Claude Code, Codex and evidence-driven Obsidian development.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "bin": { "claudex": "bin/claudex.mjs" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "security": "node bin/claudex.mjs scan --repo .",
+    "prepare": "node scripts/install-hooks.mjs",
+    "verify": "npm run check && npm test && npm run security"
+  },
+  "repository": { "type": "git", "url": "https://github.com/ParkPavel/claudex.git" },
+  "homepage": "https://github.com/ParkPavel/claudex",
+  "license": "Apache-2.0",
+  "author": "Pavel Park",
+  "files": ["bin", "src", "config", "skills", "profiles", "docs", "README.md", "LICENSE", "NOTICE"]
+}

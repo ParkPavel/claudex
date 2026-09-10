@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node "$(git rev-parse --show-toplevel)/bin/claudex.mjs" guard commit --repo "$(git rev-parse --show-toplevel)"

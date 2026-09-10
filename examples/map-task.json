@@ -1,0 +1,13 @@
+{
+  "taskId": "map-entrypoint",
+  "role": "code-mapper",
+  "mode": "snapshot",
+  "goal": "Identify the application entrypoint and the first persistent write on the selected user path.",
+  "paths": [],
+  "authority": "read-only",
+  "acceptedDecisions": ["Inspect current source. Do not change files."],
+  "criteria": [
+    { "id": "entry", "text": "The entrypoint is identified with a current source reference." },
+    { "id": "write", "text": "The write path is supported by source evidence or explicitly marked UNKNOWN." }
+  ]
+}
