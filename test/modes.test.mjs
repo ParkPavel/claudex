@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, packet } from './helpers.mjs';
-import { delegate, interactive, markUnavailable, mode, panel, readDelegation, recordJob, resolve, restore, settle, status } from '../src/modes.mjs';
+import { delegate, interactive, markUnavailable, mode, panel, parseDelegationSpec, readDelegation, recordJob, resolve, restore, settle, status } from '../src/modes.mjs';
 import { roleTable } from '../src/modes.mjs';
 import { submit, runWorker, listJobs, jobFile } from '../src/jobs.mjs';
 import { readJSON } from '../src/io.mjs';
@@ -129,4 +129,12 @@ test('the window drives the same acts as the flags, and reports a refusal withou
  assert.ok(written.some(text=>/Refused: A provider cannot substitute for itself/.test(text)));
  assert.equal(mode(await readDelegation(ws)),'dual-model');
  assert.equal((await readDelegation(ws)).history[0].recheck,'NONE');
+});
+
+test('the delegation spec survives a shell that would eat the arrow',async()=>{
+ assert.deepEqual(parseDelegationSpec('codex:claude'),{unavailable:'codex',substitute:'claude'});
+ assert.deepEqual(parseDelegationSpec('codex>claude'),{unavailable:'codex',substitute:'claude'});
+ assert.deepEqual(parseDelegationSpec(' codex : claude '),{unavailable:'codex',substitute:'claude'});
+ // A swallowed arrow leaves one name behind; that must not read as a delegation.
+ for(const bad of ['codex','','codex:','a:b:c',undefined])assert.throws(()=>parseDelegationSpec(bad),/--delegate/);
 });

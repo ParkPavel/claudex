@@ -20,7 +20,7 @@ than inferred from the currently focused application.
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
 | `check-project` | Execute the selected profile's commands in the managed project |
 | `modes [--status\|--debt\|--json]` | Show who answers for which roles and what re-check is owed |
-| `modes --delegate A>B --reason …` | Record that A is unavailable and B answers for its roles |
+| `modes --delegate A:B --reason …` | Record that A is unavailable and B answers for its roles |
 | `modes --unavailable P --reason …` | Block a provider's roles without substituting anyone |
 | `modes --restore P [--note …]` | Return a provider's roles; the re-check debt survives |
 | `modes --settle ID --evidence …` | Record that the owed re-check ran, with references |

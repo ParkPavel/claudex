@@ -20,11 +20,15 @@ blocks on a prompt.
 
 | Act | Flag | What it records |
 |---|---|---|
-| Delegate | `modes --delegate codex>claude --reason "…"` | `codex` is unavailable and `claude` answers for its roles |
+| Delegate | `modes --delegate codex:claude --reason "…"` | `codex` is unavailable and `claude` answers for its roles |
 | Mark unavailable | `modes --unavailable codex --reason "…"` | `codex` is unavailable and nobody substitutes; its roles refuse to run |
 | Restore | `modes --restore codex [--note "…"]` | `codex` is back and owns its roles again |
 | Settle | `modes --settle <delegation-id> --evidence <ref[,ref]>` | the owed re-check has been run, with evidence |
 | Read | `modes --status`, `modes --debt`, `--json` | the state, for a person or a script |
+
+Write the pair as `codex:claude`. The arrow form `codex>claude` means the same thing, but a
+shell reads `>` as a redirect and will quietly write a file instead of delegating anything, so
+it needs quotes: `--delegate "codex>claude"`.
 
 `--roles a,b` narrows a delegation to named roles instead of every role the absent provider
 owns. A reason shorter than a sentence is refused: the record exists for a reader who arrives

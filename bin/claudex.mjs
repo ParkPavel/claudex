@@ -5,7 +5,7 @@ import { assert, atomicJSON, readJSON, resolveWorkspace, ROOT, snapshot } from '
 import { initWorkspace, syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { submit, runWorker, inspectJobs, cancel, jobFile, listJobs, TERMINAL } from '../src/jobs.mjs';
-import { delegate, interactive, markUnavailable, panel, restore, settle, status as modeStatus } from '../src/modes.mjs';
+import { delegate, interactive, markUnavailable, panel, parseDelegationSpec, restore, settle, status as modeStatus } from '../src/modes.mjs';
 import { scan, preCommit, prePush } from '../src/security.mjs';
 import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
@@ -24,7 +24,7 @@ const command=options._[0] || 'help';
 const print=value=>console.log(JSON.stringify(value,null,2));
 try {
   if(command==='help') {
-    console.log(`Claudex 0.1.0\n\ninit --workspace <desktop> --project <relative-folder> [--profile obsidian] [--vault <name>]\nsync | doctor                         Verify/update generated entrypoints\nworktree <task-id> [--base <ref>]      Prepare an isolated writer checkout\nrun <packet.json> [--wait]             Submit a versioned provider job\nstatus [job-id] | cancel <job-id>      Inspect/cancel the exact job\nobsidian <operation> [--params <json>] [--write]\nmodes [--status|--debt|--json]         Open the mode window; see who answers for whom\nmodes --delegate codex>claude --reason <text> [--roles a,b]\nmodes --unavailable <provider> --reason <text> | --restore <provider> [--note <text>]\nmodes --settle <delegation-id> --evidence <ref[,ref]>\ncheck-project                         Run the selected profile checks\nscan --repo <path> [--history]         Inspect staged content or all history\nguard commit|push                     Git hook entrypoints\n\nUse --workspace <desktop> from outside the workspace.\nState, evidence and credentials never belong in the public repository.`);
+    console.log(`Claudex 0.1.0\n\ninit --workspace <desktop> --project <relative-folder> [--profile obsidian] [--vault <name>]\nsync | doctor                         Verify/update generated entrypoints\nworktree <task-id> [--base <ref>]      Prepare an isolated writer checkout\nrun <packet.json> [--wait]             Submit a versioned provider job\nstatus [job-id] | cancel <job-id>      Inspect/cancel the exact job\nobsidian <operation> [--params <json>] [--write]\nmodes [--status|--debt|--json]         Open the mode window; see who answers for whom\nmodes --delegate codex:claude --reason <text> [--roles a,b]\nmodes --unavailable <provider> --reason <text> | --restore <provider> [--note <text>]\nmodes --settle <delegation-id> --evidence <ref[,ref]>\ncheck-project                         Run the selected profile checks\nscan --repo <path> [--history]         Inspect staged content or all history\nguard commit|push                     Git hook entrypoints\n\nUse --workspace <desktop> from outside the workspace.\nState, evidence and credentials never belong in the public repository.`);
   } else if(command==='init') {
     assert(options.workspace && options.project,'init requires --workspace and --project');
     const ws=await initWorkspace(options);print({workspace:ws.root,project:ws.project,state:ws.state});
@@ -52,8 +52,7 @@ try {
     else if(command==='modes') {
       const report=async()=>modeStatus(ws,await listJobs(ws));
       if(options.delegate&&options.delegate!==true) {
-        const [unavailable,substitute]=String(options.delegate).split('>').map(item=>item.trim());
-        assert(unavailable&&substitute,'Use --delegate <unavailable>><substitute>, for example codex>claude');
+        const {unavailable,substitute}=parseDelegationSpec(options.delegate);
         print(await delegate(ws,{unavailable,substitute,reason:options.reason===true?'':options.reason||'',roles:options.roles&&options.roles!==true?String(options.roles).split(',').map(r=>r.trim()).filter(Boolean):null}));
       } else if(options.unavailable&&options.unavailable!==true)print(await markUnavailable(ws,{provider:String(options.unavailable),reason:options.reason===true?'':options.reason||''}));
       else if(options.restore&&options.restore!==true)print(await restore(ws,{provider:String(options.restore),note:options.note&&options.note!==true?String(options.note):null}));

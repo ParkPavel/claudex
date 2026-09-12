@@ -26,6 +26,16 @@ export async function readDelegation(ws) {
   return state;
 }
 
+/**
+ * `codex>claude` reads well and, in a shell, is a redirect. `codex:claude` means
+ * the same thing and survives being typed without quotes, so both are accepted.
+ */
+export function parseDelegationSpec(spec) {
+  const parts = String(spec ?? '').split(/[>:]/).map(part => part.trim()).filter(Boolean);
+  assert(parts.length === 2, 'Use --delegate <unavailable>:<substitute>, for example codex:claude (quote it to write codex>claude)');
+  return { unavailable: parts[0], substitute: parts[1] };
+}
+
 export async function rolesOf(provider) {
   return Object.entries(await roleTable()).filter(([, role]) => role.provider === provider).map(([name]) => name);
 }
