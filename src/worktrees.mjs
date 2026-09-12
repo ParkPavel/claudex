@@ -70,6 +70,14 @@ export async function inspect(repo, entry, { mainBranch = 'main' } = {}) {
         const [behind, ahead] = (await git(entry.path, ['rev-list', '--left-right', '--count', `${base}...HEAD`])).trim().split(/\s+/).map(Number);
         Object.assign(report, { behind, ahead });
         report.merged = (await git(repo, ['branch', '--merged', mainBranch, '--list', entry.branch])).trim().length > 0;
+        // Commits that are not in the base branch are not necessarily lost: a
+        // worktree cut from a feature branch shares its commits with that branch
+        // and, often, with a remote. What matters is whether any other ref still
+        // holds them once this checkout and its branch are gone.
+        if (report.head) {
+          const holders = (await git(repo, ['branch', '--all', '--contains', report.head, '--format=%(refname)'])).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+          report.heldElsewhere = holders.filter(ref => ref !== `refs/heads/${entry.branch}`);
+        }
       }
     }
     report.lastCommit = (await git(entry.path, ['log', '-1', '--format=%cI'])).trim() || null;
@@ -90,7 +98,7 @@ export function blockers(report) {
   if (report.error) found.push(`cannot be inspected: ${report.error}`);
   if (report.dirty) found.push(`${report.dirty} uncommitted file(s)`);
   if (report.operation) found.push(`an unfinished ${report.operation}`);
-  if (report.merged === false && report.ahead) found.push(`${report.ahead} commit(s) not in the base branch`);
+  if (report.merged === false && report.ahead && !report.heldElsewhere?.length) found.push(`${report.ahead} commit(s) held by no other branch`);
   return found;
 }
 
