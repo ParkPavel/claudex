@@ -38,7 +38,7 @@ export async function syncWorkspace(ws) {
   const previous = await exists(manifestPath) ? await readJSON(manifestPath) : {};
   const files = {};
   const relHarness = path.relative(ws.root, ROOT).split(path.sep).join('/');
-  const pointer = `# Claudex workspace\n\nAgent configuration moved to [Claudex](${ws.config.repositoryUrl}).\nRead [the shared contract](${relHarness}/config/core.md) before work.\nManaged project: \`${ws.config.project}\`. Local context: \`.local/claudex/project-profile.md\` when present.\nRun \`node ${relHarness}/bin/claudex.mjs doctor\` to verify this workspace.\nUse \`node ${relHarness}/bin/claudex.mjs\` for jobs and Obsidian CLI evidence.\nLoad relevant skills from \`${relHarness}/skills\`; do not load the full library by default.\n`;
+  const pointer = `# Claudex workspace\n\nAgent configuration moved to [Claudex](${ws.config.repositoryUrl}).\nRead [the shared contract](${relHarness}/config/core.md) before work.\nManaged project: \`${ws.config.project}\`. Local context: \`.local/claudex/project-profile.md\` when present.\nRun \`node ${relHarness}/bin/claudex.mjs doctor\` to verify this workspace.\nUse \`node ${relHarness}/bin/claudex.mjs\` for jobs and Obsidian CLI evidence.\nLoad relevant skills from \`${relHarness}/skills\`; do not load the full library by default.\nThe contract, the selected profile and the skills for the task are what a job needs. \`${relHarness}/docs/\` explains the harness to people, and \`${relHarness}/docs/research/\` records dated observations; neither is required to do the work.\n`;
   files['AGENTS.md'] = pointer;
   files['CLAUDE.md'] = pointer;
   files['.gitignore'] = '# This desktop is local storage. Publish each nested repository independently.\n*\n';

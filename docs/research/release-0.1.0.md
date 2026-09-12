@@ -1,6 +1,8 @@
 # Claudex 0.1.0: release evidence
 
-Recorded on 2026-09-10. This is an integration record, not a comparative benchmark.
+Recorded on 2026-09-10, and left as recorded. This page is a snapshot of one release, not
+a description of the harness as it stands: the numbers below were true that day. This is an
+integration record, not a comparative benchmark.
 The repository commit containing this record identifies the public source tree. Detailed
 job journals, configuration digests and host artifacts remain in private workspace storage.
 
