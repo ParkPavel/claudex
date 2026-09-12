@@ -57,6 +57,16 @@ dependencies or copy secrets. Prepare dependencies under the project's documente
 `check-project` runs the main managed checkout; checks for a worker checkout must be run by
 the coordinator in that explicit checkout. Never report one checkout's checks as another's.
 
+Retiring a worktree needs one check first. A worker checkout often shares the main checkout's
+installed dependencies through a Windows junction at `node_modules`, and `git worktree remove`
+deletes the directory recursively: it follows that junction and empties the shared installation
+the main checkout is using. Remove the link before the worktree — `cmd /c rmdir "<worktree>
+ode_modules"`
+deletes a junction without touching its target — or verify with
+`Get-Item <path> -Force` that `node_modules` is a real directory. If the installation is already
+gone, `npm ci` in the main checkout restores it; nothing tracked is lost, but every check fails
+in the meantime with a missing executable rather than a real defect.
+
 ## Delegation between providers
 
 `modes` opens one frame in an interactive terminal and prints the same frame once anywhere
