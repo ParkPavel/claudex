@@ -4,7 +4,8 @@ import path from 'node:path';
 import { assert, atomicJSON, readJSON, resolveWorkspace, ROOT, snapshot } from '../src/io.mjs';
 import { initWorkspace, syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { doctor } from '../src/doctor.mjs';
-import { submit, runWorker, inspectJobs, cancel, jobFile, TERMINAL } from '../src/jobs.mjs';
+import { submit, runWorker, inspectJobs, cancel, jobFile, listJobs, TERMINAL } from '../src/jobs.mjs';
+import { delegate, interactive, markUnavailable, panel, restore, settle, status as modeStatus } from '../src/modes.mjs';
 import { scan, preCommit, prePush } from '../src/security.mjs';
 import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
@@ -23,7 +24,7 @@ const command=options._[0] || 'help';
 const print=value=>console.log(JSON.stringify(value,null,2));
 try {
   if(command==='help') {
-    console.log(`Claudex 0.1.0\n\ninit --workspace <desktop> --project <relative-folder> [--profile obsidian] [--vault <name>]\nsync | doctor                         Verify/update generated entrypoints\nworktree <task-id> [--base <ref>]      Prepare an isolated writer checkout\nrun <packet.json> [--wait]             Submit a versioned provider job\nstatus [job-id] | cancel <job-id>      Inspect/cancel the exact job\nobsidian <operation> [--params <json>] [--write]\ncheck-project                         Run the selected profile checks\nscan --repo <path> [--history]         Inspect staged content or all history\nguard commit|push                     Git hook entrypoints\n\nUse --workspace <desktop> from outside the workspace.\nState, evidence and credentials never belong in the public repository.`);
+    console.log(`Claudex 0.1.0\n\ninit --workspace <desktop> --project <relative-folder> [--profile obsidian] [--vault <name>]\nsync | doctor                         Verify/update generated entrypoints\nworktree <task-id> [--base <ref>]      Prepare an isolated writer checkout\nrun <packet.json> [--wait]             Submit a versioned provider job\nstatus [job-id] | cancel <job-id>      Inspect/cancel the exact job\nobsidian <operation> [--params <json>] [--write]\nmodes [--status|--debt|--json]         Open the mode window; see who answers for whom\nmodes --delegate codex>claude --reason <text> [--roles a,b]\nmodes --unavailable <provider> --reason <text> | --restore <provider> [--note <text>]\nmodes --settle <delegation-id> --evidence <ref[,ref]>\ncheck-project                         Run the selected profile checks\nscan --repo <path> [--history]         Inspect staged content or all history\nguard commit|push                     Git hook entrypoints\n\nUse --workspace <desktop> from outside the workspace.\nState, evidence and credentials never belong in the public repository.`);
   } else if(command==='init') {
     assert(options.workspace && options.project,'init requires --workspace and --project');
     const ws=await initWorkspace(options);print({workspace:ws.root,project:ws.project,state:ws.state});
@@ -48,6 +49,26 @@ try {
     else if(command==='status')print(await inspectJobs(ws,options._[1]));
     else if(command==='cancel')print(await cancel(ws,options._[1]));
     else if(command==='obsidian')print(await obsidian(ws,options._[1],options.params?JSON.parse(options.params):{},{write:options.write===true}));
+    else if(command==='modes') {
+      const report=async()=>modeStatus(ws,await listJobs(ws));
+      if(options.delegate&&options.delegate!==true) {
+        const [unavailable,substitute]=String(options.delegate).split('>').map(item=>item.trim());
+        assert(unavailable&&substitute,'Use --delegate <unavailable>><substitute>, for example codex>claude');
+        print(await delegate(ws,{unavailable,substitute,reason:options.reason===true?'':options.reason||'',roles:options.roles&&options.roles!==true?String(options.roles).split(',').map(r=>r.trim()).filter(Boolean):null}));
+      } else if(options.unavailable&&options.unavailable!==true)print(await markUnavailable(ws,{provider:String(options.unavailable),reason:options.reason===true?'':options.reason||''}));
+      else if(options.restore&&options.restore!==true)print(await restore(ws,{provider:String(options.restore),note:options.note&&options.note!==true?String(options.note):null}));
+      else if(options.settle&&options.settle!==true)print(await settle(ws,{id:String(options.settle),evidence:options.evidence===true?'':options.evidence||''}));
+      else if(options.debt===true)print((await report()).debt);
+      else if(options.json===true||options.status===true)print(await report());
+      // The window is interactive only where a person can answer it. Elsewhere the
+      // same state prints once, so a script never blocks on a prompt.
+      else if(process.stdin.isTTY&&process.stdout.isTTY) {
+        const readline=await import('node:readline/promises');
+        const rl=readline.createInterface({input:process.stdin,output:process.stdout});
+        try{const session=await interactive(ws,{write:text=>process.stdout.write(text),question:prompt=>rl.question(prompt)},listJobs);print({acts:session.acts.length,state:await report()});}
+        finally{rl.close();}
+      } else console.log(panel(await report()));
+    }
     else if(command==='check-project') {
       const profile=await readJSON(path.join(ROOT,'profiles',`${ws.config.profile}.json`));
       const before=await snapshot(ws.project);
