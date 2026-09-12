@@ -144,3 +144,28 @@ test('a declined summary writes nothing',async t=>{
  const { io }=scripted(['project','generic','approval','claude','','codex','gpt-6-astra','skip','no']);
  assert.equal(await runSetup(io,{root:ws.root,roles:await roles()}),null);
 });
+
+test('native role definitions follow the installation, not the shipped table',async t=>{
+ const ws=await fixture(t);
+ const claudeArchitect=path.join(ws.root,'.claude','agents','architect.md');
+ const codexArchitect=path.join(ws.root,'.codex','agents','architect.toml');
+ assert.ok(await fs.readFile(claudeArchitect,'utf8'));
+ // The installation moves the architect to the other provider. A managed job and
+ // an interactive session must not disagree about who answers for the role.
+ ws.config.assignments={architect:{provider:'codex',model:'gpt-5.6-terra',effort:'max'}};
+ await syncWorkspace(ws);
+ const written=await fs.readFile(codexArchitect,'utf8');
+ assert.match(written,/model = "gpt-5\.6-terra"/);
+ assert.match(written,/model_reasoning_effort = "max"/);
+ await assert.rejects(fs.readFile(claudeArchitect,'utf8'),/ENOENT/);
+});
+
+test('a role moved to claude without a model leaves the choice to the client',async t=>{
+ const ws=await fixture(t);
+ ws.config.assignments={auditor:{provider:'claude'}};
+ ws.config.models={...ws.config.models,claude:null};
+ await syncWorkspace(ws);
+ const written=await fs.readFile(path.join(ws.root,'.claude','agents','auditor.md'),'utf8');
+ assert.ok(!/^model:/m.test(written),'no model line rather than a made-up one');
+ assert.match(written,/effort: high/);
+});

@@ -6,7 +6,7 @@ import { fixture, packet } from './helpers.mjs';
 import { git, readJSON } from '../src/io.mjs';
 import { createWorktree } from '../src/workspace.mjs';
 import { blockers, inspect, inspectAll, linkTarget, listWorktrees, retire } from '../src/worktrees.mjs';
-import { claim, conflictsWith, overlaps, readClaims, release } from '../src/claims.mjs';
+import { claim, conflictsWith, overlaps, readClaims, release, releaseFor } from '../src/claims.mjs';
 import { classifyProviderFailure, submit, listJobs } from '../src/jobs.mjs';
 import { approve } from '../src/approvals.mjs';
 import { doctor } from '../src/doctor.mjs';
@@ -150,4 +150,41 @@ test('doctor reports a claim whose owner is gone',async t=>{
  await release(ws,'ghost');
  assert.equal((await doctor(ws)).checks.find(check=>check.name==='scope-claims').status,'PASS');
  assert.equal((await listJobs(ws)).length,0);
+});
+
+test('a claim can be refined under the same id, and a refused one leaves nothing',async t=>{
+ const ws=await fixture(t);
+ // A worktree reserves its scope by branch name, then records the path it got.
+ await claim(ws,{id:'claudex/T',owner:'worktree',ref:'claudex/T',paths:['src']});
+ const refined=await claim(ws,{id:'claudex/T',owner:'worktree',ref:'/tmp/T',paths:['src']});
+ assert.equal(refined.ref,'/tmp/T');
+ assert.equal((await readClaims(ws)).claims.length,1);
+ await assert.rejects(claim(ws,{id:'claudex/U',owner:'worktree',ref:'claudex/U',paths:['src/index.mjs']}),/already claimed/);
+ assert.equal((await readClaims(ws)).claims.length,1,'a refused claim is not stored');
+});
+
+test('a retired worktree stops owning its scope',async t=>{
+ const ws=await fixture(t);
+ const tree=await createWorktree(ws,'W9');
+ await claim(ws,{id:tree.branch,owner:'worktree',ref:tree.path,paths:['source.txt']});
+ const result=await retire(ws.project,tree.path);
+ const { released }=await releaseFor(ws,[tree.path,result.branchDeleted]);
+ assert.equal(released,1);
+ assert.deepEqual((await readClaims(ws)).claims,[]);
+});
+
+test('a worktree whose commits live in another branch is not holding them hostage',async t=>{
+ const ws=await fixture(t);
+ const tree=await createWorktree(ws,'W10');
+ await fs.writeFile(path.join(tree.path,'source.txt'),'work committed on the worktree branch\n');
+ await git(tree.path,['add','.']);await git(tree.path,['commit','-m','worktree commit']);
+ const entry=(await listWorktrees(ws.project)).find(item=>path.resolve(item.path)===path.resolve(tree.path));
+ const alone=await inspect(ws.project,entry,{mainBranch:'feature/test'});
+ assert.equal(alone.ahead,1);assert.equal(alone.merged,false);
+ assert.match(blockers(alone).join(),/held by no other branch/);
+ // The same commit, now also on another branch: nothing is lost by retiring.
+ await git(ws.project,['branch','keeps-the-work',(await git(tree.path,['rev-parse','HEAD'])).trim()]);
+ const shared=await inspect(ws.project,entry,{mainBranch:'feature/test'});
+ assert.ok(shared.heldElsewhere.some(ref=>ref.endsWith('keeps-the-work')));
+ assert.deepEqual(blockers(shared),[]);
 });

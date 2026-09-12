@@ -52,15 +52,30 @@ export async function claim(ws, { id, owner, ref, paths, overlap = null }) {
   assert(Array.isArray(paths) && paths.length && paths.every(item => typeof item === 'string' && item.trim()), 'A claim needs at least one path');
   return withLock(ws.state, async () => {
     const state = await readClaims(ws);
-    const conflicts = conflictsWith(state, paths);
+    // A claim never conflicts with the record it replaces.
+    const conflicts = conflictsWith(state, paths, { ignore: id });
     if (conflicts.length) {
       assert(typeof overlap === 'string' && overlap.trim().length >= 8, `Scope already claimed by ${conflicts.map(item => `${item.ref} (${item.touching.join(', ')})`).join('; ')}. Release it, or record why the overlap is intended.`);
     }
+    // Re-claiming under the same id replaces the previous record: a worktree
+    // reserves its scope by branch name and then records the path it got.
     state.claims = state.claims.filter(entry => entry.id !== id);
     const record = { id, owner, ref, paths: paths.map(normalise), openedAt: new Date().toISOString(), overlap: overlap?.trim() ?? null };
     state.claims.push(record);
     await atomicJSON(claimsFile(ws), state);
     return record;
+  });
+}
+
+/** Release whatever a path or branch was holding: a retired worktree owns nothing. */
+export async function releaseFor(ws, references) {
+  const wanted = new Set(references.filter(Boolean).map(normalise));
+  return withLock(ws.state, async () => {
+    const state = await readClaims(ws);
+    const kept = state.claims.filter(entry => !wanted.has(normalise(entry.id)) && !wanted.has(normalise(entry.ref)));
+    const released = state.claims.length - kept.length;
+    if (released) { state.claims = kept; await atomicJSON(claimsFile(ws), state); }
+    return { released };
   });
 }
 

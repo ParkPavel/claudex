@@ -10,7 +10,7 @@ import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
 import { delegate, interactive, markUnavailable, panel, parseDelegationSpec, restore, settle, status as modeStatus } from '../src/modes.mjs';
 import { approve, pending } from '../src/approvals.mjs';
-import { claim, readClaims, release } from '../src/claims.mjs';
+import { claim, readClaims, release, releaseFor } from '../src/claims.mjs';
 import { inspectAll, retire } from '../src/worktrees.mjs';
 import { runSetup } from '../src/setup.mjs';
 import { validateConfig } from '../src/config.mjs';
@@ -113,13 +113,24 @@ State, evidence and credentials never belong in the public repository.`);
     }
     else if(command==='worktree') {
       if(options.retire&&options.retire!==true) {
-        print(await retire(ws.project,path.resolve(ws.root,String(options.retire)),{force:options.force===true,reason:text(options.reason),removeBranch:options['keep-branch']!==true}));
+        const target=path.resolve(ws.root,String(options.retire));
+        const result=await retire(ws.project,target,{force:options.force===true,reason:text(options.reason),removeBranch:options['keep-branch']!==true});
+        // A retired checkout owns nothing; its scope goes back before the command returns.
+        result.claimsReleased=(await releaseFor(ws,[target,result.branchDeleted])).released;
+        print(result);
       } else if(options.list===true)print(await inspectAll(ws.project));
       else {
-        const created=await createWorktree(ws,options._[1],options.base);
+        // The scope is claimed before the checkout exists. A refused claim must
+        // leave nothing behind: a half-created worktree and an orphan branch are
+        // exactly the debris this command exists to prevent.
+        const task=options._[1];
         const paths=list(options.paths);
-        if(paths)created.claim=await claim(ws,{id:created.branch,owner:'worktree',ref:created.path,paths,overlap:text(options.overlap)});
-        print(created);
+        const reserved=paths?await claim(ws,{id:`claudex/${task}`,owner:'worktree',ref:`claudex/${task}`,paths,overlap:text(options.overlap)}):null;
+        try {
+          const created=await createWorktree(ws,task,options.base);
+          if(reserved)created.claim=await claim(ws,{...reserved,ref:created.path,overlap:reserved.overlap});
+          print(created);
+        } catch (error) { if(reserved)await release(ws,reserved.id); throw error; }
       }
     }
     else if(command==='claims') {
