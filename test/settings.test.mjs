@@ -8,7 +8,7 @@ import { CONFIG_VERSION, defaultConfig, migrateConfig, resolveAssignment, valida
 import { syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { submit } from '../src/jobs.mjs';
 import { approve, readApproval } from '../src/approvals.mjs';
-import { chooseAssignments, projectProblem, runSetup, summary } from '../src/setup.mjs';
+import { chooseAssignments, frame, projectProblem, runSetup, summary, wrap } from '../src/setup.mjs';
 
 const roles = () => readJSON(new URL('../config/roles.json', import.meta.url));
 
@@ -168,4 +168,28 @@ test('a role moved to claude without a model leaves the choice to the client',as
  const written=await fs.readFile(path.join(ws.root,'.claude','agents','auditor.md'),'utf8');
  assert.ok(!/^model:/m.test(written),'no model line rather than a made-up one');
  assert.match(written,/effort: high/);
+});
+
+test('a refused answer re-asks the same role instead of shifting the rest',async t=>{
+ const ws=await fixture(t);
+ const table=await roles();
+ // lead, architect, then implementer refused once and corrected. The correction
+ // must land on implementer, not on designer.
+ const { io, written }=scripted(['','','codex','claude/opus-5@max','claude/haiku@medium','skip']);
+ const assignments=await chooseAssignments(io,{roles:table,config:defaultConfig({project:'p'}),current:{}});
+ assert.match(written.join(''),/codex serves read-only roles only/);
+ assert.deepEqual(assignments.implementer,{model:'opus-5',effort:'max'});
+ assert.deepEqual(assignments.designer,{model:'haiku'});
+ assert.ok(!assignments.tester,'skip stops the walk where it was typed');
+});
+
+test('the window wraps its own explanation instead of cutting it',async()=>{
+ const long='These are created next to it, and none of them belong in a public repository, which is why the window says so before creating any of them.';
+ const lines=wrap(long);
+ assert.ok(lines.length>1);
+ assert.equal(lines.join(' '),long,'no word is lost or split');
+ assert.ok(lines.every(item=>item.length<=72));
+ const drawn=frame('Title',[long]);
+ assert.ok(drawn.split(String.fromCharCode(10)).every(item=>item.length===76),'every row keeps the frame width');
+ assert.match(drawn,/creating any of them/);
 });

@@ -149,7 +149,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     child = spawnSpec(adapter.spec,adapter.args,repo);
     job.childPid = child.pid;
     await save('STARTING');
-    let ready = false, result = null, parseError = null, stdout = '', stderr = '', buffer = '', stopped = null;
+    let ready = false, result = null, parseError = null, stdout = '', stderr = '', buffer = '', stopped = null, providerError = null;
     const started = Date.now();
     const maximumOutput = 16 * 1024 * 1024;
     child.stdout.on('data',chunk => {
@@ -164,6 +164,12 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
           if (readyEvent(event,adapter.provider)) {
             ready = true;
             if(event.model)job.runtime.resolvedModel=event.model;
+          }
+          // A provider reports its own refusal in the event stream and still exits
+          // with a plain code. Keeping that text is the difference between
+          // "exited unsuccessfully (1)" and "this model needs a newer CLI".
+          if (event.type === 'error' || event.type === 'turn.failed' || event.is_error) {
+            providerError = typeof event.message === 'string' ? event.message : JSON.stringify(event.error ?? event);
           }
           const answer = resultEvent(event,adapter.provider);
           if (answer) result = answer;
@@ -190,7 +196,8 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     job.after = await snapshot(repo);
     const configurationCurrent = job.configurationDigest === await runtimeDigest(ws);
     job.evidenceFreshness = configurationCurrent && (packet.authority === 'workspace-write' || job.before.digest === job.after.digest) ? 'CURRENT' : 'STALE';
-    if (stopped) { await save(stopped,{exit}); return; }
+    job.providerError = providerError;
+    if (stopped) { await save(stopped,{exit,providerError}); return; }
     assert(exit.code === 0,`Worker exited unsuccessfully (${exit.code}); inspect local artifacts`);
     assert(ready,'No provider readiness event received');
     assert(result,`No structured result received${parseError ? '; inspect local event stream' : ''}`);
@@ -203,13 +210,13 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     if (delegation) job.recheck = 'OWED';
     await save('COMPLETED',{exit,acceptance:'UNKNOWN'});
   } catch (error) {
-    job.providerFailure = classifyProviderFailure(error.message,job.runtime?.provider);
+    job.providerFailure = classifyProviderFailure(`${error.message} ${job.providerError ?? ''}`,job.runtime?.provider);
     if (child) await stopTree(child);
     if (!claimed) {
       const current = await readJSON(file);
       if (current.status !== 'QUEUED') return;
     }
-    await save('FAILED',{error:error.message,acceptance:'UNKNOWN',providerFailure:job.providerFailure ?? null});
+    await save('FAILED',{error:error.message,acceptance:'UNKNOWN',providerError:job.providerError ?? null,providerFailure:job.providerFailure ?? null});
   } finally {
     // A finished job stops holding its scope, whatever it finished as.
     if (TERMINAL.has(job.status)) await release(ws,id).catch(()=>{});
@@ -218,6 +225,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
 
 const FAILURE_SIGNATURES = [
   [/usage limit|quota|rate.?limit|insufficient_quota|credit/i,'QUOTA'],
+  [/requires a newer version|unsupported model|unknown model|model_not_found|does not (?:exist|support)|invalid_request_error/i,'MODEL'],
   [/oauth|unauthori[sz]ed|forbidden|401|403|not allowed|login/i,'AUTH'],
   [/ENOENT|not recognized|command not found|no such file/i,'EXECUTABLE'],
 ];
@@ -232,7 +240,12 @@ export function classifyProviderFailure(message,provider) {
   for (const [pattern,kind] of FAILURE_SIGNATURES) {
     if (!pattern.test(message)) continue;
     const other = provider === 'codex' ? 'claude' : 'codex';
-    return { kind, provider: provider ?? null, suggestion: kind === 'EXECUTABLE' || !provider ? 'Run claudex doctor: the provider executable did not start.' : `If ${provider} is unavailable, hand its roles over on the record: claudex modes --delegate ${provider}:${other} --reason "<why>"` };
+    if (kind === 'EXECUTABLE' || !provider) return { kind, provider: provider ?? null, suggestion: 'Run claudex doctor: the provider executable did not start.' };
+    // A model the installed CLI cannot serve is a settings problem, not an
+    // outage: handing the role to the other provider would answer a question
+    // nobody asked.
+    if (kind === 'MODEL') return { kind, provider, suggestion: `${provider} refused the requested model. Choose one its installed CLI serves: claudex settings --assign <role>=${provider}/<model>, or upgrade the ${provider} CLI.` };
+    return { kind, provider, suggestion: `If ${provider} is unavailable, hand its roles over on the record: claudex modes --delegate ${provider}:${other} --reason "<why>"` };
   }
   return null;
 }
