@@ -114,6 +114,7 @@ export async function runWorker(ws,id) {
     for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
     prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
     await fs.mkdir(artifactDir,{recursive:true});
+    await save('PREFLIGHT',{artifactDirectory:artifactDir});
     await fs.writeFile(path.join(artifactDir,'packet.json'),JSON.stringify(packet,null,2),{flag:'wx',mode:0o600});
     await save('STARTING');
     child = spawnSpec(adapter.spec,adapter.args,repo);
@@ -168,7 +169,7 @@ export async function runWorker(ws,id) {
     await fs.writeFile(path.join(artifactDir,'result.json'),JSON.stringify(result,null,2),{flag:'wx',mode:0o600});
     // A model verdict is a proposal. An independent acceptance record remains mandatory.
     job.proposedAcceptance = result.criteria.some(c=>c.status==='FAIL') ? 'FAIL' : result.criteria.some(c=>c.status==='UNKNOWN') ? 'UNKNOWN' : 'PASS';
-    await save('COMPLETED',{exit,acceptance:'UNKNOWN',artifactDirectory:artifactDir});
+    await save('COMPLETED',{exit,acceptance:'UNKNOWN'});
   } catch (error) {
     if (child) await stopTree(child);
     if (!claimed) {

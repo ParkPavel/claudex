@@ -34,3 +34,33 @@ test('feature push is allowed only after complete reachable history scan',async 
 test('direct commit to an established main is blocked',async t=>{
  const ws=await fixture(t);await git(ws.project,['branch','-m','main']);await assert.rejects(preCommit(ws.project),/protected/);
 });
+
+test('product baseline permits unchanged public blobs but rejects new secret history',async t=>{
+ const ws=await fixture(t);const secret=['ghp','d'.repeat(36)].join('_');
+ await fs.writeFile(path.join(ws.project,'legacy.txt'),secret);await git(ws.project,['add','.']);await git(ws.project,['commit','-m','Public baseline fixture']);
+ const baseline=(await git(ws.project,['rev-parse','HEAD'])).trim();await git(ws.project,['config','claudex.publicationBaseline',baseline]);
+ assert.equal((await preCommit(ws.project)).ok,true);
+ await fs.writeFile(path.join(ws.project,'introduced.txt'),secret);await git(ws.project,['add','.']);
+ await assert.rejects(preCommit(ws.project),/github-credential/);
+ await git(ws.project,['commit','-m','Introduced fixture']);await git(ws.project,['rm','introduced.txt']);await git(ws.project,['commit','-m','Deleted fixture']);
+ const tip=(await git(ws.project,['rev-parse','HEAD'])).trim();
+ await assert.rejects(prePush(ws.project,'origin','https://example.invalid/repo',`refs/heads/test ${tip} refs/heads/test ${'0'.repeat(40)}`),/github-credential/);
+});
+
+test('baseline must be an ancestor and does not exempt relocated public blobs',async t=>{
+ const ws=await fixture(t);const baseline=(await git(ws.project,['rev-parse','HEAD'])).trim();
+ await fs.mkdir(path.join(ws.project,'.local'));await fs.writeFile(path.join(ws.project,'.local','private.txt'),'original\n');await git(ws.project,['add','-f','.local/private.txt']);
+ assert.equal((await scan(ws.project,{baseline})).ok,false);
+ await assert.rejects(scan(ws.project,{baseline:'a'.repeat(40)}),/ancestor/);
+});
+
+test('pushing the baseline itself cannot exempt symlinks or submodules',async t=>{
+ for(const [mode,kind] of [['120000','publishable-symlink'],['160000','unreviewed-submodule']]) {
+  const ws=await fixture(t);const object=(await git(ws.project,['rev-parse',mode==='120000'?'HEAD:source.txt':'HEAD'])).trim();
+  await git(ws.project,['update-index','--add','--cacheinfo',`${mode},${object},external`]);
+  await git(ws.project,['commit','-m','Nonregular baseline fixture']);
+  const baseline=(await git(ws.project,['rev-parse','HEAD'])).trim();await git(ws.project,['config','claudex.publicationBaseline',baseline]);
+  const result=await scan(ws.project,{history:true,revision:baseline,baseline});assert.equal(result.ok,false);assert(result.findings.some(f=>f.kind===kind));
+  await assert.rejects(prePush(ws.project,'origin','https://example.invalid/repo',`refs/heads/test ${baseline} refs/heads/test ${'0'.repeat(40)}`),new RegExp(kind));
+ }
+});

@@ -1,5 +1,9 @@
 # Commands and task contracts
 
+Project check arguments may contain `{artifactDirectory}`; the runner replaces it with that
+run's private output directory as one argument. The Obsidian profile writes its Jest JSON
+report there, alongside command logs and the source-bound check record.
+
 Run `node claudex/bin/claudex.mjs help` from the workspace desktop. When outside it, pass
 `--workspace <desktop>`. The working directory is resolved to the managed Git root rather
 than inferred from the currently focused application.

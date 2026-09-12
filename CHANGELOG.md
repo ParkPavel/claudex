@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Keep artifact-directory references for failed and interrupted provider runs.
+- Support shared hooks for existing product repositories with an explicit public baseline;
+  newly introduced blobs are checked across every proposed commit.
+
 ## 0.1.0 — 2026-09-10
 
 Initial extraction of the shared agent harness into a separate public project.

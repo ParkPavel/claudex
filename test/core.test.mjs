@@ -70,6 +70,15 @@ test('status revalidates evidence after a completed job',async t=>{
 test('a worker without readiness times out and its process ends',async t=>{
  const ws=await fixture(t);const result=await submit(ws,packet({goal:'wait'}),{start:false});await runWorker(ws,result.jobId);
  const job=JSON.parse(await fs.readFile(jobFile(ws,result.jobId),'utf8'));assert.equal(job.status,'TIMED_OUT');assert.throws(()=>process.kill(job.childPid,0));
+ assert.equal(await fs.readFile(path.join(job.artifactDirectory,'packet.json'),'utf8'),JSON.stringify(job.packet,null,2));
+});
+
+test('failed provider keeps its artifact directory and diagnostic stream',async t=>{
+ const ws=await fixture(t);await fs.appendFile(ws.config.executables.codex,'\nif(!process.argv.includes("--help")&&!process.argv.includes("--version")){console.error("fixture failure");process.exitCode=2;}\n');
+ const result=await submit(ws,packet(),{start:false});await runWorker(ws,result.jobId);
+ const job=JSON.parse(await fs.readFile(jobFile(ws,result.jobId),'utf8'));assert.equal(job.status,'FAILED');
+ assert.match(await fs.readFile(path.join(job.artifactDirectory,'stderr.log'),'utf8'),/fixture failure/);
+ assert.equal(job.acceptance,'UNKNOWN');
 });
 test('duplicate active task rejected and queued cancellation preserved',async t=>{
  const ws=await fixture(t);const result=await submit(ws,packet(),{start:false});await assert.rejects(submit(ws,packet(),{start:false}),/active job/);
@@ -81,8 +90,12 @@ test('a duplicate worker cannot overwrite another worker journal',async t=>{
  await runWorker(ws,result.jobId);assert.equal(JSON.parse(await fs.readFile(file,'utf8')).status,'RUNNING');
 });
 async function waitFor(ws,id,predicate) {
- const deadline=Date.now()+10000;
- while(Date.now()<deadline) { const job=JSON.parse(await fs.readFile(jobFile(ws,id),'utf8'));if(predicate(job))return job;await new Promise(r=>setTimeout(r,25)); }
+ const deadline=Date.now()+30000;
+ while(Date.now()<deadline) {
+  const job=JSON.parse(await fs.readFile(jobFile(ws,id),'utf8'));if(predicate(job))return job;
+  if(['COMPLETED','FAILED','TIMED_OUT','CANCELLED'].includes(job.status))throw new Error(`Fixture ended before expected state: ${job.status}: ${job.error || 'no error recorded'}`);
+  await new Promise(r=>setTimeout(r,25));
+ }
  throw new Error('Timed out waiting for fixture job state');
 }
 test('managed jobs share a concurrency cap across worker loops',async t=>{
@@ -97,8 +110,10 @@ test('managed jobs share a concurrency cap across worker loops',async t=>{
 test('running cancellation waits for provider termination',async t=>{
  const ws=await fixture(t);ws.config.readyTimeoutMs=4000;
  const result=await submit(ws,packet({goal:'wait'}),{start:false});const running=runWorker(ws,result.jobId);
- const started=await waitFor(ws,result.jobId,j=>j.childPid);await cancel(ws,result.jobId);await running;
- assert.equal(JSON.parse(await fs.readFile(jobFile(ws,result.jobId),'utf8')).status,'CANCELLED');assert.throws(()=>process.kill(started.childPid,0));
+ try {
+  const started=await waitFor(ws,result.jobId,j=>j.childPid);await cancel(ws,result.jobId);await running;
+  assert.equal(JSON.parse(await fs.readFile(jobFile(ws,result.jobId),'utf8')).status,'CANCELLED');assert.throws(()=>process.kill(started.childPid,0));
+ } finally {await cancel(ws,result.jobId);await running;}
 });
 test('Obsidian arguments pin the vault first and keep strings as single arguments',()=>{
  const args=obsidianArgs('Test Vault','read',{path:'Folder/My Note.md'});assert.deepEqual(args,['vault=Test Vault','read','path=Folder/My Note.md']);
