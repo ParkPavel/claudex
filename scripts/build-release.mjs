@@ -23,7 +23,13 @@ await git(['archive', '--format=zip', '--prefix=claudex/', `--output=${archive}`
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-release-'));
 try {
   if (process.platform === 'win32') {
-    await exec('powershell', ['-NoProfile', '-Command', 'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1]', archive, temporary], { windowsHide: true });
+    await exec('powershell', [
+      '-NoProfile', '-Command',
+      "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:CLAUDEX_RELEASE_ARCHIVE -DestinationPath $env:CLAUDEX_RELEASE_DESTINATION",
+    ], {
+      windowsHide: true,
+      env: { ...process.env, CLAUDEX_RELEASE_ARCHIVE: archive, CLAUDEX_RELEASE_DESTINATION: temporary },
+    });
   } else {
     await exec('unzip', ['-q', archive, '-d', temporary]);
   }
