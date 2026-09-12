@@ -1,5 +1,7 @@
 # Publish and protect Claudex
 
+For a separate existing product, use the [product guard adoption guide](product-guards.md).
+
 The desktop directory is not a Git repository for publication. Create the remote for the
 `claudex` folder only. Authentication remains in the user's credential manager or GitHub CLI.
 

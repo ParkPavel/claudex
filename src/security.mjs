@@ -19,10 +19,21 @@ export function inspectBlob(file, bytes) {
   });
   return findings;
 }
-export async function scan(repo, { history = false, revision } = {}) {
+export async function scan(repo, { history = false, revision, baseline } = {}) {
   const findings = [];
   const seen = new Set();
-  const revisions = history ? (await git(repo, ['rev-list', ...(revision ? [revision] : ['--all'])])).trim().split('\n').filter(Boolean) : [null];
+  if (baseline) {
+    assert(/^[0-9a-f]{40,64}$/.test(baseline),'Publication baseline must be an exact commit ID');
+    try { await git(repo,['merge-base','--is-ancestor',baseline,revision || 'HEAD']); }
+    catch { throw new Error('Publication baseline must be an ancestor of the proposed source'); }
+    for(const record of (await git(repo,['ls-tree','-rz',baseline])).split('\0').filter(Boolean)) {
+      const tab=record.indexOf('\t'),meta=record.slice(0,tab).split(' ');
+      // Grandfather exact path/object pairs already present in the reviewed public baseline.
+      if(meta[0]!=='160000'&&meta[0]!=='120000')seen.add(`${record.slice(tab+1)}:${meta[2]}`);
+    }
+  }
+  let blobsChecked=0;
+  const revisions = history ? (await git(repo, ['rev-list', ...(revision ? [revision] : ['--all']), ...(baseline ? [`^${baseline}`] : [])])).trim().split('\n').filter(Boolean) : [null];
   for (const rev of revisions) {
     const raw = rev ? await git(repo, ['ls-tree', '-rz', rev]) : await git(repo, ['ls-files', '--stage', '-z']);
     for (const record of raw.split('\0').filter(Boolean)) {
@@ -36,18 +47,22 @@ export async function scan(repo, { history = false, revision } = {}) {
       const key = `${file}:${oid}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      blobsChecked++;
       const blob = await git(repo, ['cat-file', 'blob', oid], { encoding: 'buffer' });
       findings.push(...inspectBlob(file, blob).map(f => ({ ...f, ...(rev ? { commit: rev } : {}) })));
     }
   }
-  return { ok: findings.length === 0, blobsChecked: seen.size, findings };
+  return { ok: findings.length === 0, blobsChecked, findings };
+}
+async function publicationBaseline(repo) {
+  return git(repo,['config','--local','--get','claudex.publicationBaseline']).then(s=>s.trim()||undefined,()=>undefined);
 }
 export async function preCommit(repo) {
   const branch = (await git(repo, ['branch', '--show-current'])).trim();
   let unborn = false;
   try { await git(repo, ['rev-parse', '--verify', 'HEAD']); } catch { unborn = true; }
   assert(unborn || !['main','master'].includes(branch), 'Direct commits to protected branches are blocked. Use a feature branch.');
-  const result = await scan(repo);
+  const result = await scan(repo,{baseline:await publicationBaseline(repo)});
   assert(result.ok, JSON.stringify(result.findings));
   return result;
 }
@@ -73,7 +88,7 @@ export async function prePush(repo, remote, url, input) {
       try { await git(repo, ['merge-base', '--is-ancestor', remoteSha, localSha]); }
       catch { throw new Error('Non-fast-forward or unknown remote base blocked; fetch and inspect before retrying.'); }
     }
-    const result = await scan(repo, { history: true, revision: localSha });
+    const result = await scan(repo, { history: true, revision: localSha, baseline:await publicationBaseline(repo) });
     assert(result.ok, JSON.stringify(result.findings));
     assert(localRef.startsWith('refs/') || localRef === 'HEAD', 'Invalid local ref');
   }

@@ -4,7 +4,7 @@
   "requiredFiles": ["manifest.json", "package.json"],
   "checks": [
     { "command": "npm", "args": ["run", "build"] },
-    { "command": "npm", "args": ["test", "--", "--runInBand"] },
+    { "command": "npm", "args": ["test", "--", "--runInBand", "--json", "--outputFile", "{artifactDirectory}/jest.json"] },
     { "command": "npm", "args": ["run", "lint"] }
   ]
 }

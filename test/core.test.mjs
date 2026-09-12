@@ -70,6 +70,15 @@ test('status revalidates evidence after a completed job',async t=>{
 test('a worker without readiness times out and its process ends',async t=>{
  const ws=await fixture(t);const result=await submit(ws,packet({goal:'wait'}),{start:false});await runWorker(ws,result.jobId);
  const job=JSON.parse(await fs.readFile(jobFile(ws,result.jobId),'utf8'));assert.equal(job.status,'TIMED_OUT');assert.throws(()=>process.kill(job.childPid,0));
+ assert.equal(await fs.readFile(path.join(job.artifactDirectory,'packet.json'),'utf8'),JSON.stringify(job.packet,null,2));
+});
+
+test('failed provider keeps its artifact directory and diagnostic stream',async t=>{
+ const ws=await fixture(t);await fs.appendFile(ws.config.executables.codex,'\nif(!process.argv.includes("--help")&&!process.argv.includes("--version")){console.error("fixture failure");process.exitCode=2;}\n');
+ const result=await submit(ws,packet(),{start:false});await runWorker(ws,result.jobId);
+ const job=JSON.parse(await fs.readFile(jobFile(ws,result.jobId),'utf8'));assert.equal(job.status,'FAILED');
+ assert.match(await fs.readFile(path.join(job.artifactDirectory,'stderr.log'),'utf8'),/fixture failure/);
+ assert.equal(job.acceptance,'UNKNOWN');
 });
 test('duplicate active task rejected and queued cancellation preserved',async t=>{
  const ws=await fixture(t);const result=await submit(ws,packet(),{start:false});await assert.rejects(submit(ws,packet(),{start:false}),/active job/);
