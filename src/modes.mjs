@@ -1,6 +1,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, assert, atomicJSON, exists, readJSON, withLock } from './io.mjs';
+import { MODEL_PATTERN } from './config.mjs';
 
 // A provider can run out of quota mid-task. The remaining provider may then take
 // the absent one's roles, but only through a recorded act: who was unavailable,
@@ -58,7 +59,7 @@ export async function markUnavailable(ws, { provider, reason, actor = 'maintaine
   });
 }
 
-export async function delegate(ws, { unavailable, substitute, reason, roles = null, actor = 'maintainer' }) {
+export async function delegate(ws, { unavailable, substitute, reason, roles = null, actor = 'maintainer', model = null }) {
   assert(PROVIDERS.includes(unavailable) && PROVIDERS.includes(substitute), 'Unknown provider');
   assert(unavailable !== substitute, 'A provider cannot substitute for itself');
   const text = reasoned(reason);
@@ -72,13 +73,23 @@ export async function delegate(ws, { unavailable, substitute, reason, roles = nu
     // work anyway; refusing here says so before a job is queued.
     assert(!(substitute === 'codex' && table[name].authority !== 'read-only'), `Role ${name} requires ${table[name].authority}; codex serves read-only roles only`);
   }
+  // The substitute answers with a model, and which one is a decision, not a
+  // fallback: the absent provider's roles may carry no model of their own, and
+  // discovering that when a job starts is discovering it without a person in
+  // the room.
+  const substituteModel = model ?? ws.config.models?.[substitute] ?? null;
+  assert(substituteModel === null || MODEL_PATTERN.test(substituteModel), 'Invalid model identifier');
+  for (const name of moving) {
+    const carries = table[name].model ?? ws.config.assignments?.[name]?.model ?? null;
+    assert(substituteModel || carries, `Role ${name} has no model for ${substitute}. Pass --model, or set the ${substitute} default in the setup window.`);
+  }
   return withLock(ws.state, async () => {
     const state = await readDelegation(ws);
     assert(!state.open.some(entry => entry.unavailable === unavailable), `${unavailable} already has an open delegation`);
     assert(!state.open.some(entry => entry.unavailable === substitute), `${substitute} is itself unavailable; a chain of substitutes hides who actually answered`);
     const taken = state.open.flatMap(entry => entry.roles);
     for (const name of moving) assert(!taken.includes(name), `Role ${name} is already delegated`);
-    const record = { id: `delegation-${crypto.randomUUID()}`, unavailable, substitute, roles: moving, reason: text, actor, openedAt: new Date().toISOString(), recheck: 'OWED', jobs: [] };
+    const record = { id: `delegation-${crypto.randomUUID()}`, unavailable, substitute, roles: moving, reason: text, actor, model: substituteModel, openedAt: new Date().toISOString(), recheck: 'OWED', jobs: [] };
     state.providers[unavailable] = { available: false, reason: text, since: record.openedAt, actor };
     state.open.push(record);
     await atomicJSON(delegationFile(ws), state);
@@ -146,7 +157,9 @@ export async function recordJob(ws, id, jobId) {
 export async function resolve(ws, name, role) {
   const state = await readDelegation(ws);
   const entry = openFor(state, name);
-  if (entry) return { role: { ...role, provider: entry.substitute }, delegation: { id: entry.id, from: entry.unavailable, to: entry.substitute, role: name, reason: entry.reason } };
+  // Substitution replaces the model too: a name that belongs to the absent
+  // provider means nothing to the one answering in its place.
+  if (entry) return { role: { ...role, provider: entry.substitute, model: entry.model ?? role.model }, delegation: { id: entry.id, from: entry.unavailable, to: entry.substitute, role: name, reason: entry.reason, model: entry.model } };
   const provider = providerState(state, role.provider);
   assert(provider.available, `${role.provider} is marked unavailable (${provider.reason}). Delegate its roles or restore it before running ${name}.`);
   return { role, delegation: null };
@@ -220,7 +233,8 @@ export async function interactive(ws, io, listJobs) {
         const unavailable = (await io.question('provider that ran out: ')).trim();
         const substitute = (await io.question('provider taking its roles: ')).trim();
         const reason = await io.question('reason (recorded): ');
-        acts.push({ act: 'delegate', record: await delegate(ws, { unavailable, substitute, reason }) });
+        const model = (await io.question(`model ${substitute} answers with (empty: its configured default): `)).trim();
+        acts.push({ act: 'delegate', record: await delegate(ws, { unavailable, substitute, reason, model: model || null }) });
       } else if (choice === 'u') {
         const provider = (await io.question('provider to mark unavailable: ')).trim();
         const reason = await io.question('reason (recorded): ');

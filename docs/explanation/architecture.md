@@ -34,6 +34,12 @@ flowchart TD
 | `profiles/` | Portable project-type requirements | A particular person's vault |
 | Native entrypoints | Discovery and references to maintained instructions | Independent copies of the full policy |
 | `src/jobs.mjs` | Queue slots, job identity, process state, artifact capture | Semantic truth of a model's claim |
+| `src/config.mjs` | The shape of a local configuration, its migration and who answers for a role | Any I/O, or the state it describes |
+| `src/setup.mjs` | The installation window: the decisions an installation cannot make for someone else | Writing anything itself |
+| `src/approvals.mjs` | One-shot permission for one writing task | Judging whether the work is a good idea |
+| `src/claims.mjs` | Which task is working on which files | Preventing a person from overlapping deliberately |
+| `src/worktrees.mjs` | What is happening inside each checkout, and how to retire one safely | Deciding when work is finished |
+| `src/modes.mjs` | Recorded handover of a provider's roles, and the re-check it owes | Opening a handover on a model's initiative |
 | Local project profile | Product constraints and canonical document references | Global model policy |
 | Git and GitHub | Version history and publication enforcement | Agent reasoning |
 
@@ -50,6 +56,33 @@ Native interactive sessions remain native sessions. Their small generated deny r
 additional guidance, not an operating-system security boundary. If an organization supplies
 managed settings, those settings may remain authoritative. Run capability checks for the
 actual installed versions and apply organizational isolation where necessary.
+
+## Access, scope and visibility
+
+Three decisions belong to the installation rather than to this repository, and each is a
+setting with teeth rather than a note in a document.
+
+**How far a writer may go without asking.** `full`, `scoped` and `approval` differ in what may
+be changed, never in what may be read. A fresh installation is `approval`: reasoning and
+review run freely, and a person says yes before a file changes. A configuration written by the
+previous version is read as `scoped`, because that is what it enforced; an upgrade neither
+invents a protection nor drops one.
+
+**Who answers for a role.** The role table carries defaults; an installation may move a role to
+the other provider or pin a model and an effort. Only differences are stored, so a change to
+the shared table still reaches every installation. A writing role cannot be assigned to a
+read-only adapter, and the refusal happens where the choice is made.
+
+**What is already being worked on.** A writing task declares its files and claims them; an
+overlapping second writer is refused unless someone records why the overlap is intended.
+Reading claims nothing. Three parallel rewrites of the same documents, each unaware of the
+others, is what this exists to prevent, and a coarse warning before the work beats a merge
+conflict after it.
+
+`doctor` is where these become visible: the access mode, the assignments in effect, every
+worktree with its uncommitted work, unfinished operations and shared-install links, open
+claims whose owner is gone, open delegations with their outstanding re-check, and approvals
+that expired unused. Work is lost in the places nobody looks at.
 
 ## Job state and evidence
 

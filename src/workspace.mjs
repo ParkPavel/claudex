@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, sha } from './io.mjs';
+import { ACCESS, CONFIG_VERSION, defaultConfig, validateConfig } from './config.mjs';
 
-export async function initWorkspace({ workspace, project, profile = 'generic', vault = null, url = 'https://github.com/ParkPavel/claudex' }) {
+export async function initWorkspace({ workspace, project, profile = 'generic', vault = null, url = 'https://github.com/ParkPavel/claudex', access = 'approval', assignments = {}, models = {}, executables = {} }) {
   const root = await fs.realpath(path.resolve(workspace));
   const target = await contained(root, path.resolve(root, project));
   assert(target !== root, 'The desktop root must contain the managed project, not be the project');
@@ -13,7 +14,13 @@ export async function initWorkspace({ workspace, project, profile = 'generic', v
   await fs.mkdir(state, { recursive: true });
   const configPath = path.join(state, 'workspace.json');
   assert(!(await exists(configPath)), 'Workspace already exists. Use sync to update generated entrypoints.');
-  const config = { schemaVersion: 1, project: path.relative(root, target), profile, repositoryUrl: url, maxWorkers: 3, models: { codex: null }, executables: { codex: 'codex', claude: 'claude', obsidian: 'obsidian' }, obsidian: { vault, vaultPath: null, testVault: false }, readyTimeoutMs: 60000, runTimeoutMs: 900000 };
+  assert(ACCESS.includes(access), `Unknown access mode ${access}; expected ${ACCESS.join(', ')}`);
+  const config = defaultConfig({ project: path.relative(root, target), profile, vault, url });
+  config.access = access;
+  config.assignments = assignments;
+  config.models = { ...config.models, ...models };
+  config.executables = { ...config.executables, ...executables };
+  validateConfig(config, await readJSON(path.join(ROOT, 'config/roles.json')));
   await atomicJSON(configPath, config);
   await atomicJSON(path.join(root, '.claudex.json'), { schemaVersion: 1, state: '.local/claudex' });
   await fs.mkdir(path.join(root, '.tmp'), { recursive: true });
@@ -22,11 +29,16 @@ export async function initWorkspace({ workspace, project, profile = 'generic', v
   return ws;
 }
 export async function syncWorkspace(ws) {
+  // Reading a workspace migrates its configuration in memory; this is where the
+  // upgrade is written down, once, next to the generated files it belongs with.
+  if (ws.storedVersion !== undefined && ws.storedVersion !== CONFIG_VERSION) {
+    await atomicJSON(path.join(ws.state, 'workspace.json'), ws.config);
+  }
   const manifestPath = path.join(ws.state, 'generated-files.json');
   const previous = await exists(manifestPath) ? await readJSON(manifestPath) : {};
   const files = {};
   const relHarness = path.relative(ws.root, ROOT).split(path.sep).join('/');
-  const pointer = `# Claudex workspace\n\nAgent configuration moved to [Claudex](${ws.config.repositoryUrl}).\nRead [the shared contract](${relHarness}/config/core.md) before work.\nManaged project: \`${ws.config.project}\`. Local context: \`.local/claudex/project-profile.md\` when present.\nRun \`node ${relHarness}/bin/claudex.mjs doctor\` to verify this workspace.\nUse \`node ${relHarness}/bin/claudex.mjs\` for jobs and Obsidian CLI evidence.\nLoad relevant skills from \`${relHarness}/skills\`; do not load the full library by default.\n`;
+  const pointer = `# Claudex workspace\n\nAgent configuration moved to [Claudex](${ws.config.repositoryUrl}).\nRead [the shared contract](${relHarness}/config/core.md) before work.\nManaged project: \`${ws.config.project}\`. Local context: \`.local/claudex/project-profile.md\` when present.\nRun \`node ${relHarness}/bin/claudex.mjs doctor\` to verify this workspace.\nUse \`node ${relHarness}/bin/claudex.mjs\` for jobs and Obsidian CLI evidence.\nLoad relevant skills from \`${relHarness}/skills\`; do not load the full library by default.\nThe contract, the selected profile and the skills for the task are what a job needs. \`${relHarness}/docs/\` explains the harness to people, and \`${relHarness}/docs/research/\` records dated observations; neither is required to do the work.\n`;
   files['AGENTS.md'] = pointer;
   files['CLAUDE.md'] = pointer;
   files['.gitignore'] = '# This desktop is local storage. Publish each nested repository independently.\n*\n';

@@ -38,17 +38,32 @@ and Linux are covered by the CI configuration; real-host results are recorded se
 
 ```sh
 git clone https://github.com/ParkPavel/claudex.git
-cd claudex
-npm install
-node bin/claudex.mjs init --workspace .. --project your-project --profile generic
+cd claudex && npm ci
+node bin/claudex.mjs setup --workspace ..
 node bin/claudex.mjs doctor --workspace ..
 ```
 
-Your managed project must already be a Git repository beside `claudex`. For Obsidian,
-select `--profile obsidian --vault "Your Test Vault"` and follow the
-[Obsidian setup guide](docs/how-to/obsidian.md). Fill in the explicit Codex model and local
-executable/vault settings in `.local/claudex/workspace.json`. Authentication stays with the
-provider CLIs; Claudex does not copy credentials into its repository.
+`setup` opens a window and asks the things an installation cannot decide for you: which
+project it manages, how much it may do without asking, and which model answers for which
+role. It lists what it will create around your project before creating any of it. In a
+script, `init` takes the same decisions as flags and never prompts.
+
+Your managed project must already be a Git repository beside `claudex`. For Obsidian, choose
+the `obsidian` profile and follow the [Obsidian setup guide](docs/how-to/obsidian.md).
+Authentication stays with the provider CLIs; Claudex does not copy credentials into its
+repository. See [install and adapt](docs/how-to/setup.md) for the full walkthrough.
+
+## Adapt it to your stack
+
+| Decision | Default | Change it with |
+|---|---|---|
+| What a writer may do without asking | `approval` — one recorded approval per writing task | `settings --access full\|scoped\|approval` |
+| Which model answers for a role | The shared role table | `settings --assign architect=codex/gpt-5.6-terra@max` |
+| Which files a task owns | Declared per task, claimed while it runs | `worktree TASK --paths docs,src/lib` |
+
+Reading and reviewing are never gated; the access modes differ in what may be changed. A role
+that writes cannot be assigned to a read-only provider, and the refusal happens where the
+choice is made rather than when the job runs.
 
 ## Run a bounded task
 
@@ -66,15 +81,18 @@ the exact job. Inspect it by ID. `COMPLETED` means the provider returned a valid
 `proposedAcceptance` is the model's assessment. The job's acceptance remains `UNKNOWN`
 until independently adjudicated evidence is recorded outside that proposal.
 
-Writing tasks require a separate worktree:
+Writing tasks require a separate worktree, and — in the default access mode — an approval:
 
 ```sh
-node claudex/bin/claudex.mjs worktree implement-one-change --base HEAD
+node claudex/bin/claudex.mjs worktree implement-one-change --base HEAD --paths src/lib
+node claudex/bin/claudex.mjs approve implement-one-change --reason "Reviewed the plan and its scope"
 ```
 
 Assign the returned path to an `implementer` packet. Claude's managed worker uses confined
 file tools; it does not receive an unrestricted shell. The coordinator runs project checks
-with `check-project`. See the [command reference](docs/reference/commands.md) for limits.
+with `check-project`. When the work is finished, retire the checkout through the harness —
+`worktree --retire` detaches shared dependency links before git deletes the directory — and
+see the [command reference](docs/reference/commands.md) for the rest.
 
 ## What is implemented
 
@@ -87,6 +105,12 @@ with `check-project`. See the [command reference](docs/reference/commands.md) fo
 | Obsidian evidence capture | Explicit vault identity, local artifacts, test-vault mutation gate |
 | Publication guards | Staged/history secret checks, protected refs, fast-forward and deletion checks |
 | Recovery visibility | Exact job IDs, readiness deadlines, cancellation and orphan diagnosis |
+| Installation window | Project, access mode, providers and per-role models, collected before anything is written |
+| Access modes | `full`, `scoped`, `approval`; one-shot approvals spent by the worker that uses them |
+| Scope claims | Writing tasks declare and claim their files; an overlap needs a recorded reason |
+| Worktree visibility and retirement | Uncommitted work, unfinished merges and shared installs are reported, and links are detached before removal |
+| Recorded provider handover | A quota that ends becomes a delegation with an owed re-check, never a silent substitution |
+| Push journal | Every push through the guard appends a line written by the boundary, not by its author |
 
 Claudex 0.1.0 is an initial engineering release. It does not claim benchmark superiority,
 perfect secret detection, automatic recovery of orphan processes, or autonomous product
@@ -95,7 +119,8 @@ acceptance. Read [the threat model](SECURITY.md) and [validation boundaries](doc
 ## Documentation
 
 - **Learn:** [architecture and state model](docs/explanation/architecture.md).
-- **Operate:** [Obsidian CLI](docs/how-to/obsidian.md), [migration](docs/how-to/migration.md), [publication](docs/how-to/publication.md).
+- **Install:** [install and adapt](docs/how-to/setup.md).
+- **Operate:** [Obsidian CLI](docs/how-to/obsidian.md), [provider handover](docs/how-to/delegation.md), [migration](docs/how-to/migration.md), [publication](docs/how-to/publication.md).
 - **Reference:** [commands and contracts](docs/reference/commands.md).
 - **Evaluate:** [research sources](docs/research/evidence-register.md), [validation](docs/research/validation.md).
 - **Contribute:** [contribution guide](CONTRIBUTING.md), [release notes](CHANGELOG.md).

@@ -10,10 +10,15 @@ than inferred from the currently focused application.
 
 | Command | Result |
 |---|---|
-| `init --workspace … --project …` | Create local configuration and small native entrypoints |
-| `sync` | Update generated files only when their previous hashes match |
-| `doctor` | Check entrypoints, project prerequisites, provider executables, CLI and orphan jobs |
-| `worktree TASK --base REF` | Create a dedicated branch/worktree and instruction entrypoints |
+| `setup [--workspace …]` | Open the installation window and write the configuration it collects |
+| `init --workspace … --project … [--access …]` | The same decisions as flags, for a script that cannot answer prompts |
+| `settings [--show] [--access …] [--assign …]` | Read or change the access mode and the per-role assignments |
+| `sync` | Update generated files only when their previous hashes match; write down a migrated configuration |
+| `doctor` | Check entrypoints, prerequisites, providers, worktrees, scope claims, delegations, approvals and orphan jobs |
+| `worktree TASK --base REF [--paths a,b]` | Create a dedicated branch/worktree, and claim the scope it will work on |
+| `worktree --retire PATH [--force --reason …]` | Retire a finished worktree without taking a shared install with it |
+| `claims [--release ID]` | Show the declared work scopes, or release one |
+| `approve TASK --reason …` | Issue a one-shot approval for one writing task |
 | `run PACKET [--wait]` | Submit a task; background by default, exact job ID returned |
 | `status [JOB]` | Read all job records or one exact job |
 | `cancel JOB` | Request cancellation; terminal state follows confirmed closure |
@@ -24,6 +29,7 @@ than inferred from the currently focused application.
 | `modes --unavailable P --reason …` | Block a provider's roles without substituting anyone |
 | `modes --restore P [--note …]` | Return a provider's roles; the re-check debt survives |
 | `modes --settle ID --evidence …` | Record that the owed re-check ran, with references |
+| `modes --delegate A:B --model …` | Name the model the substitute answers with, when its roles carry none |
 | `scan --repo PATH [--history]` | Check index blobs or every reachable history blob |
 
 ## Packet
@@ -40,9 +46,10 @@ does not automatically grant a model access to Obsidian. Host operations remain 
 write allowlist. A writing worker is confined to its worktree by the provider's restricted
 file tools. Review the complete resulting diff for scope compliance.
 
-Provider/model values are explicit in the job record. Local `models` overrides role defaults;
-a packet may override model/effort, but cannot increase role authority. A missing Codex model
-blocks execution instead of silently selecting a changing default.
+Provider/model values are explicit in the job record. The order is: the packet, then the
+role's assignment in local configuration, then the role's own default, then the provider
+default in `models`. A packet may override model and effort, but cannot increase role
+authority. A missing model blocks execution instead of silently selecting a changing default.
 
 ## Result
 
@@ -78,7 +85,53 @@ the delegation without paying that debt. See [the delegation guide](../how-to/de
 
 ## State configuration
 
-`.claudex.json` points to `.local/claudex/workspace.json`. Local fields include the relative
-project, profile, provider executable paths, explicit model overrides, maximum managed
-workers, readiness/execution deadlines and Obsidian vault identity. Core code does not edit
-global provider authentication or settings.
+`.claudex.json` points to `.local/claudex/workspace.json`, schema version 2. Local fields
+include the relative project, profile, access mode, per-role assignments, provider executable
+paths, provider default models, maximum managed workers, readiness/execution deadlines and
+Obsidian vault identity. Core code does not edit global provider authentication or settings.
+
+A version 1 file is read as `access: "scoped"`, because that is what version 1 enforced: a
+writer needed its own worktree on a feature branch and nothing more. Reading a workspace
+migrates it in memory only; `sync` writes the upgrade down, so an upgrade happens once and
+visibly. `doctor` reports a file that is still on the older version.
+
+### Access modes
+
+| Mode | A writing task |
+|---|---|
+| `full` | runs as soon as its packet is valid |
+| `scoped` | runs only in its own worktree, on a feature branch |
+| `approval` | also needs a one-shot approval recorded for that exact task |
+
+Reading and reviewing are never gated. A fresh installation is `approval`; the approval is a
+file under `.local/claudex/approvals/`, spent by the worker that uses it, so one approval
+cannot start a second writer with the same task name. See
+[the setup guide](../how-to/setup.md).
+
+### Assignments
+
+`assignments` maps a role to `{ provider, model, effort }`, and only the differences from the
+role default are stored, so an upstream change to the role table still reaches the
+installation. A role whose authority is `workspace-write` cannot be assigned to a provider
+whose adapter is read-only; the setup window and `settings` both refuse it before it is
+written.
+
+## Scopes and worktrees
+
+A writing job claims the paths its packet declares, and a worktree claims the paths given to
+`worktree --paths`. A second writer over the same files is refused unless the overlap is
+recorded with a reason. Read-only work claims nothing: two reviewers reading the same file
+are not a collision.
+
+`worktree --retire` is the way to finish with a checkout. It refuses uncommitted work, an
+unfinished merge or commits that are not in the base branch, unless forced with a recorded
+reason. Before removing the directory it removes the harness's own generated pointers and
+detaches shared dependency links, because `git worktree remove` deletes recursively and would
+otherwise follow a junction into the installation the main checkout is using.
+
+## Reports
+
+Every push through the guard appends one line to `.local/claudex/reports/pushes.jsonl`: the
+time, the remote, its URL and each ref with both object IDs. It is written by the boundary the
+push physically crosses rather than by whoever made it, which is the difference between a
+record and a claim.

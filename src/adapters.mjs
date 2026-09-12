@@ -9,8 +9,11 @@ export async function prepareAdapter(ws, packet, role) {
   const helpArgs = role.provider === 'codex' ? ['exec','--help'] : ['--help'];
   const help = (await runCommand(command, helpArgs)).stdout;
   const version = (await runCommand(command, ['--version'])).stdout.trim();
-  const model = packet.model || ws.config.models[role.provider] || role.model;
-  assert(model, `Set an explicit ${role.provider} model in local workspace.json`);
+  // Packet first, then what this role was assigned, then the provider default.
+  // A role that names its own model keeps it: a provider-wide default must not
+  // silently flatten every role onto one model.
+  const model = packet.model || role.model || ws.config.models[role.provider];
+  assert(model, `No model for ${role.provider}. Set it for this role in the setup window, or as the provider default in local workspace.json`);
   assert(/^[a-zA-Z0-9._:/-]+$/.test(model), 'Invalid model identifier');
   const effort = packet.effort || role.effort;
   assert(['low','medium','high','xhigh','max'].includes(effort), 'Invalid effort');

@@ -32,6 +32,11 @@ prove different things. Bind evidence to the code/configuration it tested; mark 
 snapshots stale. Report PASS, FAIL or UNKNOWN per criterion. Never convert unknown to pass.
 
 Writing roles work in separate worktrees. Review roles cannot acquire write authority.
+An installation decides how far that goes: a writer may additionally require a recorded
+approval for its exact task, and where one is required its absence stops the job rather than
+softening it. Declare the files a writing task will change; work already claimed by another
+task is a collision to resolve with a person, not to discover in a merge. Retire a worktree
+through the harness, never by deleting the directory.
 Run meaningful checks proportional to the change. Do not write cosmetic or tautological
 tests just to satisfy a ritual. A green test of the wrong path is not product evidence.
 

@@ -6,7 +6,7 @@ import { roleTable } from '../src/modes.mjs';
 import { submit, runWorker, listJobs, jobFile } from '../src/jobs.mjs';
 import { readJSON } from '../src/io.mjs';
 
-const codexOut = { unavailable: 'codex', substitute: 'claude', reason: 'Codex quota exhausted for the day' };
+const codexOut = { unavailable: 'codex', substitute: 'claude', reason: 'Codex quota exhausted for the day', model: 'opus' };
 
 test('a delegation records who answered for whom, and why',async t=>{
  const ws=await fixture(t);
@@ -30,12 +30,12 @@ test('substitution never invents a provider, a self-handover or a chain',async t
  await assert.rejects(delegate(ws,{...codexOut,substitute:'codex'}),/cannot substitute for itself/);
  await delegate(ws,codexOut);
  await assert.rejects(delegate(ws,codexOut),/already has an open delegation/);
- await assert.rejects(delegate(ws,{unavailable:'claude',substitute:'codex',reason:'Claude quota exhausted too',roles:['lead']}),/itself unavailable/);
+ await assert.rejects(delegate(ws,{unavailable:'claude',substitute:'codex',reason:'Claude quota exhausted too',roles:['lead'],model:'gpt-6-astra'}),/itself unavailable/);
 });
 
 test('a delegation cannot widen authority or move a role its owner does not have',async t=>{
  const ws=await fixture(t);
- await assert.rejects(delegate(ws,{unavailable:'claude',substitute:'codex',reason:'Claude quota exhausted today',roles:['implementer']}),/read-only roles only/);
+ await assert.rejects(delegate(ws,{unavailable:'claude',substitute:'codex',reason:'Claude quota exhausted today',roles:['implementer'],model:'gpt-6-astra'}),/read-only roles only/);
  await assert.rejects(delegate(ws,{...codexOut,roles:['lead']}),/does not belong to codex/);
 });
 
@@ -123,7 +123,7 @@ test('the window shows the current arrangement and the acts available',async t=>
 test('the window drives the same acts as the flags, and reports a refusal without exiting',async t=>{
  const ws=await fixture(t);
  const written=[];
- const answers=['d','codex','codex','Codex quota exhausted for the day','d','codex','claude','Codex quota exhausted for the day','r','codex','quota reset','q'];
+ const answers=['d','codex','codex','Codex quota exhausted for the day','opus','d','codex','claude','Codex quota exhausted for the day','opus','r','codex','quota reset','q'];
  const session=await interactive(ws,{write:text=>written.push(text),question:async()=>answers.shift()},listJobs);
  assert.deepEqual(session.acts.map(act=>act.act),['delegate','restore']);
  assert.ok(written.some(text=>/Refused: A provider cannot substitute for itself/.test(text)));
@@ -137,4 +137,16 @@ test('the delegation spec survives a shell that would eat the arrow',async()=>{
  assert.deepEqual(parseDelegationSpec(' codex : claude '),{unavailable:'codex',substitute:'claude'});
  // A swallowed arrow leaves one name behind; that must not read as a delegation.
  for(const bad of ['codex','','codex:','a:b:c',undefined])assert.throws(()=>parseDelegationSpec(bad),/--delegate/);
+});
+
+test('a substitute cannot answer without a model anyone chose',async t=>{
+ const ws=await fixture(t);
+ // Codex roles carry no model of their own, so the substitute needs one named
+ // here, while a person is present, rather than discovered when a job starts.
+ await assert.rejects(delegate(ws,{unavailable:'codex',substitute:'claude',reason:'Codex quota exhausted for the day'}),/no model for claude/);
+ const record=await delegate(ws,{unavailable:'codex',substitute:'claude',reason:'Codex quota exhausted for the day',model:'opus'});
+ assert.equal(record.model,'opus');
+ const table=await roleTable();
+ const {role}=await resolve(ws,'auditor',table.auditor);
+ assert.equal(role.provider,'claude');assert.equal(role.model,'opus');
 });

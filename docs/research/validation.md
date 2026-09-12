@@ -12,9 +12,16 @@ printed. Tests exercise both success and failure behavior.
 The suite covers workspace discovery, edited entrypoint refusal, path/junction escape,
 dirty/untracked snapshot changes, role escalation, empty-diff mapping, model/effort flags,
 criterion identity, worktree bootstrap, process readiness, timeouts, cancellation, duplicate
-tasks/workers, stale evidence and preservation of UNKNOWN acceptance. Publication cases
-include staged-versus-working-tree content, secrets deleted from later history, redacted
-diagnostics, protected refs, deletion and non-fast-forward pushes.
+tasks/workers, stale evidence and preservation of UNKNOWN acceptance. Configuration cases
+cover migration from the previous schema, refusal of an assignment a provider cannot serve,
+and the access mode a writer is measured against, including the one-shot approval and the
+fact that it is spent once. Coordination cases cover scope claims and the overlap a person
+records deliberately, worktree inspection and retirement — including that a shared dependency
+link is detached rather than followed — recorded provider handover with its owed re-check, and
+the classification of a provider failure into a next step. Publication cases include
+staged-versus-working-tree content, secrets deleted from later history, redacted diagnostics,
+protected refs, deletion and non-fast-forward pushes, and the line each push appends to the
+local journal.
 
 These tests establish contracts against fixtures. They do not prove that a future provider
 release enforces the same sandbox, that an Obsidian flow works, or that a skill improves
