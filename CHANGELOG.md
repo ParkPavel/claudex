@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-09-13
+
+### Distributable setup
+
+- A clean source snapshot can be built as a self-contained ZIP with
+  `npm run release:archive`. The build verifies the archive, executes its CLI and writes a
+  SHA-256 checksum next to it.
+- `setup.cmd` and `setup.sh` start the existing installation window directly after unpacking;
+  no dependency installation is needed because Claudex has no runtime packages.
+- Release archives omit tests, CI, hooks, contributor material and dated research evidence.
+  Those remain in the source repository; the installed harness keeps only runtime code,
+  maintained policy, focused skills and user documentation.
+- Installing Git hooks is now an explicit maintainer action (`npm run hooks:install`) rather
+  than a side effect of packing the project.
+
 ### Installing and adapting
 
 - `setup` opens an installation window: the managed project, the access mode, the provider
@@ -55,4 +70,5 @@ Initial extraction of the shared agent harness into a separate public project.
 - Migration guidance and source-linked architectural decisions.
 
 This release establishes implementation contracts. Comparative model/skill effectiveness
-has not been established; see [validation](docs/research/validation.md).
+has not been established; see the online
+[validation notes](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).

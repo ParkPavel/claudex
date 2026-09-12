@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ROOT, exists, git, readJSON } from './io.mjs';
+import { ROOT, exists, git, inside, readJSON } from './io.mjs';
 import { ACCESS, MODEL_EXAMPLES, MODEL_PATTERN, PROVIDERS, EFFORTS, resolveAssignment } from './config.mjs';
 
 // The window a person meets when they install this harness on their own machine.
@@ -78,6 +78,7 @@ export async function projectProblem(root, candidate) {
   if (!candidate) return 'Name the folder of the project this harness will manage.';
   const target = path.resolve(root, candidate);
   if (path.resolve(target) === path.resolve(root)) return 'The workspace root cannot be the managed project; the project lives inside it.';
+  if (!inside(root, target)) return `${target} is outside the workspace. Choose a Git repository inside ${root}.`;
   if (!(await exists(target))) return `${target} does not exist. Create or clone the project first.`;
   const top = await git(target, ['rev-parse', '--show-toplevel']).then(value => value.trim(), () => null);
   if (!top || path.resolve(top) !== path.resolve(target)) return `${target} is not a Git root. Claudex manages a repository, not a folder inside one.`;

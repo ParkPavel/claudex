@@ -9,7 +9,8 @@ The desktop directory is not a Git repository for publication. Create the remote
 
 Run `npm run verify`, inspect `git status`, stage the intended public files, and run
 `node bin/claudex.mjs scan --repo .`. Before publishing existing history, add `--history`.
-Verify that hooks are installed with `git config --get core.hooksPath`; it must resolve to
+Install the repository hooks with `npm run hooks:install`, then verify them with
+`git config --get core.hooksPath`; the result must resolve to
 the harness `.githooks` directory. Do not disable hooks to work around a finding.
 
 ## Initial empty repository
@@ -25,7 +26,9 @@ failed attempt. This exception does not permit later direct pushes to `main`.
 Work on a feature branch, push it through the hook, then use a pull request. Require passing
 checks, resolved review conversations and appropriate approval. Existing tags are immutable;
 publish a new version instead of rewriting one. Review generated release notes for private
-paths and artifacts before creating a release.
+paths and artifacts before creating a release. From the clean release commit, run
+`npm run release:archive`; publish both the resulting ZIP and its `.sha256` file from the
+local `artifacts/` directory.
 
 On GitHub, enable branch protection for `main`: reject force pushes and deletion, require
 pull requests and checks, and apply restrictions to administrators. A single-maintainer

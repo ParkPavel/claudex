@@ -8,7 +8,7 @@
 использует нативный Obsidian CLI для живых улик.
 
 [English documentation](README.md) · [Архитектура](docs/explanation/architecture.md) ·
-[Безопасность](SECURITY.md) · [Реестр улик](docs/research/evidence-register.md)
+[Безопасность](SECURITY.md) · [Реестр улик](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md)
 
 ## Раскладка рабочего каталога
 
@@ -52,6 +52,17 @@ node bin/claudex.mjs doctor --workspace ..
 профиль `obsidian` и следуйте [руководству по Obsidian](docs/how-to/obsidian.md). Авторизация
 остаётся в клиентах провайдеров; Клаудекс не копирует учётные данные к себе. Полный разбор —
 [установка и настройка под себя](docs/how-to/setup.md).
+
+### Из архива выпуска
+
+Распакуйте `claudex-<version>.zip` рядом с Git-репозиторием, которым нужно управлять. В
+Windows дважды нажмите `setup.cmd`; в Linux или macOS запустите `./setup.sh`. Лаунчер откроет
+то же окно установки и возьмёт родительскую папку архива как рабочий каталог. Если нужен
+другой рабочий каталог, передайте его путь первым аргументом.
+
+Архив самодостаточен: runtime-зависимостей npm у Клаудекса нет, поэтому установка — это
+распаковка и запуск лаунчера. Файл `.sha256` рядом с архивом идентифицирует полученные байты.
+Мейнтейнер собирает и проверяет оба файла командой `npm run release:archive`.
 
 ## Настройка под свой стек
 
@@ -115,7 +126,7 @@ node claudex/bin/claudex.mjs approve implement-one-change --reason "План и 
 Клаудекс 0.1.0 — первый инженерный выпуск. Он не заявляет превосходства в бенчмарках,
 безупречного обнаружения секретов, автоматического восстановления осиротевших процессов или
 самостоятельной продуктовой приёмки. Читайте [модель угроз](SECURITY.md) и
-[границы проверки](docs/research/validation.md).
+[границы проверки](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
 
 ## Документация
 
@@ -123,8 +134,8 @@ node claudex/bin/claudex.mjs approve implement-one-change --reason "План и 
 - **Установить:** [установка и настройка под себя](docs/how-to/setup.md).
 - **Работать:** [Obsidian CLI](docs/how-to/obsidian.md), [передача между провайдерами](docs/how-to/delegation.md), [миграция](docs/how-to/migration.md), [публикация](docs/how-to/publication.md).
 - **Справочник:** [команды и контракты](docs/reference/commands.md).
-- **Оценить:** [источники](docs/research/evidence-register.md), [проверка](docs/research/validation.md).
-- **Участвовать:** [руководство для контрибьюторов](CONTRIBUTING.md), [заметки о выпусках](CHANGELOG.md).
+- **Оценить:** [источники](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md), [проверка](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
+- **Участвовать:** [руководство для контрибьюторов](https://github.com/ParkPavel/claudex/blob/main/CONTRIBUTING.md), [заметки о выпусках](CHANGELOG.md).
 
 ## Лицензия
 

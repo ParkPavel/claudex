@@ -100,6 +100,7 @@ test('the setup window refuses a folder that is not a repository of its own',asy
  const ws=await fixture(t);
  assert.match(await projectProblem(ws.root,''),/Name the folder/);
  assert.match(await projectProblem(ws.root,'.'),/cannot be the managed project/);
+ assert.match(await projectProblem(ws.root,path.dirname(ws.root)),/outside the workspace/);
  assert.match(await projectProblem(ws.root,'missing'),/does not exist/);
  await fs.mkdir(path.join(ws.root,'plain'),{recursive:true});
  assert.match(await projectProblem(ws.root,'plain'),/not a Git root/);

@@ -8,7 +8,7 @@ snapshot, and separates a model's completion claim from verified acceptance. Its
 profile uses the native Obsidian CLI for live evidence.
 
 [Русская документация](README.ru.md) · [Architecture](docs/explanation/architecture.md) ·
-[Security](SECURITY.md) · [Evidence register](docs/research/evidence-register.md)
+[Security](SECURITY.md) · [Evidence register](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md)
 
 ## Workspace layout
 
@@ -52,6 +52,17 @@ Your managed project must already be a Git repository beside `claudex`. For Obsi
 the `obsidian` profile and follow the [Obsidian setup guide](docs/how-to/obsidian.md).
 Authentication stays with the provider CLIs; Claudex does not copy credentials into its
 repository. See [install and adapt](docs/how-to/setup.md) for the full walkthrough.
+
+### From a release archive
+
+Unpack `claudex-<version>.zip` beside the Git repository you want to manage. On Windows,
+double-click `setup.cmd`; on Linux or macOS, run `./setup.sh`. The launcher opens the same
+installation window and uses the archive's parent folder as the workspace. Pass another
+workspace path as its first argument when needed.
+
+The archive is self-contained: it has no runtime npm dependencies, so unpacking and opening
+the launcher is the installation. Its accompanying `.sha256` file identifies the exact bytes
+you received. Maintainers create and verify both files with `npm run release:archive`.
 
 ## Adapt it to your stack
 
@@ -114,7 +125,8 @@ see the [command reference](docs/reference/commands.md) for the rest.
 
 Claudex 0.1.0 is an initial engineering release. It does not claim benchmark superiority,
 perfect secret detection, automatic recovery of orphan processes, or autonomous product
-acceptance. Read [the threat model](SECURITY.md) and [validation boundaries](docs/research/validation.md).
+acceptance. Read [the threat model](SECURITY.md) and the online
+[validation boundaries](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
 
 ## Documentation
 
@@ -122,8 +134,8 @@ acceptance. Read [the threat model](SECURITY.md) and [validation boundaries](doc
 - **Install:** [install and adapt](docs/how-to/setup.md).
 - **Operate:** [Obsidian CLI](docs/how-to/obsidian.md), [provider handover](docs/how-to/delegation.md), [migration](docs/how-to/migration.md), [publication](docs/how-to/publication.md).
 - **Reference:** [commands and contracts](docs/reference/commands.md).
-- **Evaluate:** [research sources](docs/research/evidence-register.md), [validation](docs/research/validation.md).
-- **Contribute:** [contribution guide](CONTRIBUTING.md), [release notes](CHANGELOG.md).
+- **Evaluate:** [research sources](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md), [validation](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
+- **Contribute:** [contribution guide](https://github.com/ParkPavel/claudex/blob/main/CONTRIBUTING.md), [release notes](CHANGELOG.md).
 
 ## License
 

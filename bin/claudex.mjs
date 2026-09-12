@@ -29,6 +29,7 @@ const command=options._[0] || 'help';
 const print=value=>console.log(JSON.stringify(value,null,2));
 const text=(value,fallback=null)=>(value===undefined||value===true?fallback:String(value));
 const list=value=>(value&&value!==true?String(value).split(',').map(item=>item.trim()).filter(Boolean):null);
+const version=(await readJSON(path.join(ROOT,'package.json'))).version;
 // A window is only opened where a person can answer it; everywhere else the same
 // state is printed once, so a script never blocks on a prompt.
 const interactiveTerminal=()=>Boolean(process.stdin.isTTY&&process.stdout.isTTY);
@@ -40,7 +41,7 @@ async function terminalIO(fn) {
 }
 try {
   if(command==='help') {
-    console.log(`Claudex 0.1.0
+    console.log(`Claudex ${version}
 
 setup [--workspace <desktop>]          Open the installation window and write the configuration
 init --workspace <desktop> --project <folder> [--profile <name>] [--access full|scoped|approval] [--vault <name>]

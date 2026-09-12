@@ -136,4 +136,4 @@ can leave a job nonterminal; that state blocks unsafe automatic duplication.
 | ADR-005 | Selective original skills | Smaller context and inspectable dependencies | Paired local evaluation supports another skill |
 
 Source foundations and the distinction between evidence and inference are maintained in
-the [evidence register](../research/evidence-register.md).
+the online [evidence register](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md).

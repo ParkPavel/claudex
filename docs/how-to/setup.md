@@ -13,6 +13,30 @@ node bin/claudex.mjs setup --workspace ..
 The window opens where a person can answer it. In a script, `init` takes the same decisions
 as flags and never prompts.
 
+## Install a release archive
+
+The release ZIP is the shortest path for a new user:
+
+1. Put the ZIP in the directory that will contain both Claudex and the managed project.
+2. Extract it. The resulting directory is named `claudex`.
+3. On Windows, open `setup.cmd`. On Linux or macOS, run `./setup.sh`.
+4. Answer the installation window and confirm its summary.
+5. Run `node claudex/bin/claudex.mjs doctor` from the parent directory.
+
+The launcher defaults the workspace to the directory containing `claudex`. A different path
+can be passed as its first argument. The managed project must already be a separate Git root
+inside that workspace. The archive carries no npm dependencies and needs no `npm install`.
+
+Before unpacking, compare the archive against the published checksum:
+
+```sh
+# Linux or macOS
+sha256sum -c claudex-<version>.zip.sha256
+
+# PowerShell
+(Get-FileHash .\claudex-<version>.zip -Algorithm SHA256).Hash
+```
+
 ## What it asks
 
 **The managed project.** A folder next to the harness that is its own Git repository. The
