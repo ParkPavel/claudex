@@ -53,3 +53,14 @@ test('baseline must be an ancestor and does not exempt relocated public blobs',a
  assert.equal((await scan(ws.project,{baseline})).ok,false);
  await assert.rejects(scan(ws.project,{baseline:'a'.repeat(40)}),/ancestor/);
 });
+
+test('pushing the baseline itself cannot exempt symlinks or submodules',async t=>{
+ for(const [mode,kind] of [['120000','publishable-symlink'],['160000','unreviewed-submodule']]) {
+  const ws=await fixture(t);const object=(await git(ws.project,['rev-parse',mode==='120000'?'HEAD:source.txt':'HEAD'])).trim();
+  await git(ws.project,['update-index','--add','--cacheinfo',`${mode},${object},external`]);
+  await git(ws.project,['commit','-m','Nonregular baseline fixture']);
+  const baseline=(await git(ws.project,['rev-parse','HEAD'])).trim();await git(ws.project,['config','claudex.publicationBaseline',baseline]);
+  const result=await scan(ws.project,{history:true,revision:baseline,baseline});assert.equal(result.ok,false);assert(result.findings.some(f=>f.kind===kind));
+  await assert.rejects(prePush(ws.project,'origin','https://example.invalid/repo',`refs/heads/test ${baseline} refs/heads/test ${'0'.repeat(40)}`),new RegExp(kind));
+ }
+});

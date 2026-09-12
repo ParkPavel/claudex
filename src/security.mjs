@@ -29,7 +29,10 @@ export async function scan(repo, { history = false, revision, baseline } = {}) {
     for(const record of (await git(repo,['ls-tree','-rz',baseline])).split('\0').filter(Boolean)) {
       const tab=record.indexOf('\t'),meta=record.slice(0,tab).split(' ');
       // Grandfather exact path/object pairs already present in the reviewed public baseline.
-      if(meta[0]!=='160000'&&meta[0]!=='120000')seen.add(`${record.slice(tab+1)}:${meta[2]}`);
+      const file=record.slice(tab+1);
+      if(meta[0]==='160000')findings.push({file,kind:'unreviewed-submodule',commit:baseline});
+      else if(meta[0]==='120000')findings.push({file,kind:'publishable-symlink',commit:baseline});
+      else seen.add(`${file}:${meta[2]}`);
     }
   }
   let blobsChecked=0;
