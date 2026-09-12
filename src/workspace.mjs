@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, sha } from './io.mjs';
 import { ACCESS, CONFIG_VERSION, defaultConfig, resolveAssignment, validateConfig } from './config.mjs';
 
-export async function initWorkspace({ workspace, project, profile = 'generic', vault = null, url = 'https://github.com/ParkPavel/claudex', access = 'approval', assignments = {}, models = {}, executables = {} }) {
+export async function initWorkspace({ workspace, project, profile = 'generic', vault = null, obsidian = {}, url = 'https://github.com/ParkPavel/claudex', access = 'approval', assignments = {}, models = {}, executables = {} }) {
   const root = await fs.realpath(path.resolve(workspace));
   const target = await contained(root, path.resolve(root, project));
   assert(target !== root, 'The desktop root must contain the managed project, not be the project');
@@ -20,6 +20,8 @@ export async function initWorkspace({ workspace, project, profile = 'generic', v
   config.assignments = assignments;
   config.models = { ...config.models, ...models };
   config.executables = { ...config.executables, ...executables };
+  config.obsidian = { ...config.obsidian, ...obsidian };
+  if (vault) config.obsidian.vault = vault;
   validateConfig(config, await readJSON(path.join(ROOT, 'config/roles.json')));
   await atomicJSON(configPath, config);
   await atomicJSON(path.join(root, '.claudex.json'), { schemaVersion: 1, state: '.local/claudex' });

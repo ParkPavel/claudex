@@ -58,7 +58,9 @@ None of it belongs in a public repository, and the generated `.gitignore` in the
 root says so. Your credentials stay in your own provider CLIs; nothing is copied here.
 
 **The profile.** `generic` states the shared contract only. `obsidian` adds plugin checks and
-live evidence through the Obsidian CLI.
+live evidence through the Obsidian CLI. When selected, the same window asks for the Obsidian
+executable, exact vault name, absolute vault path and whether it is a disposable test vault.
+Production vaults stay read-only unless the user explicitly marks one for test mutations.
 
 **What the harness may do without asking.**
 

@@ -8,7 +8,7 @@ import { CONFIG_VERSION, defaultConfig, migrateConfig, resolveAssignment, valida
 import { syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { submit } from '../src/jobs.mjs';
 import { approve, readApproval } from '../src/approvals.mjs';
-import { chooseAssignments, frame, projectProblem, runSetup, summary, wrap } from '../src/setup.mjs';
+import { chooseAssignments, chooseObsidian, frame, projectProblem, runSetup, summary, wrap } from '../src/setup.mjs';
 
 const roles = () => readJSON(new URL('../config/roles.json', import.meta.url));
 
@@ -128,6 +128,36 @@ test('the setup window collects a full configuration and shows it back',async t=
  assert.match(shown,/Managed project/);assert.match(shown,/\.local\/claudex\//);
  assert.match(shown,/approval.*one-shot|one-shot/s);
  assert.match(summary(choices),/architect: provider=codex model=gpt-5\.6-terra effort=max/);
+});
+
+test('the Obsidian profile collects the live vault boundary in the same window',async t=>{
+ const ws=await fixture(t);
+ const vaultPath=path.join(ws.root,'OBStests');
+ await fs.mkdir(vaultPath);
+ const { io, written }=scripted([
+  'project','obsidian','approval',
+  'claude','','codex','',
+  'obsidian','OBStests',vaultPath,'yes',
+  'skip','yes',
+ ]);
+ const choices=await runSetup(io,{root:ws.root,roles:await roles()});
+ assert.equal(choices.executables.obsidian,'obsidian');
+ assert.deepEqual(choices.obsidian,{vault:'OBStests',vaultPath,testVault:true});
+ assert.match(written.join(''),/production vaults stay read-only/);
+ assert.match(summary(choices),/OBStests/);
+ assert.match(summary(choices),/mutations allowed/);
+});
+
+test('an Obsidian vault path must be absolute and exist',async t=>{
+ const ws=await fixture(t);
+ const vaultPath=path.join(ws.root,'vault');
+ await fs.mkdir(vaultPath);
+ const { io, written }=scripted(['obsidian','Vault','relative',path.join(ws.root,'missing'),vaultPath,'no']);
+ const choice=await chooseObsidian(io,{});
+ assert.equal(choice.config.vaultPath,vaultPath);
+ assert.equal(choice.config.testVault,false);
+ assert.match(written.join(''),/absolute path/);
+ assert.match(written.join(''),/does not exist/);
 });
 
 test('the setup window says no instead of writing a configuration that cannot work',async t=>{

@@ -44,7 +44,8 @@ try {
     console.log(`Claudex ${version}
 
 setup [--workspace <desktop>]          Open the installation window and write the configuration
-init --workspace <desktop> --project <folder> [--profile <name>] [--access full|scoped|approval] [--vault <name>]
+init --workspace <desktop> --project <folder> [--profile <name>] [--access full|scoped|approval]
+     [--vault <name> --vault-path <absolute-path> --test-vault --obsidian-executable <command>]
 settings [--access <mode>] [--assign <role>=<provider>[/<model>][@<effort>]] [--show]
 sync | doctor                          Verify/update generated entrypoints and inspect the workspace
 worktree <task-id> [--base <ref>] [--paths a,b]
@@ -71,17 +72,23 @@ State, evidence and credentials never belong in the public repository.`);
     const choices=await terminalIO(io=>runSetup(io,{root:existing?.root??root,config:existing?.config??null,project:text(options.project)}));
     if(!choices){console.log('Nothing written.');process.exitCode=1;}
     else if(existing) {
-      const config={...existing.config,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables};
+      const config={...existing.config,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,...(choices.obsidian?{obsidian:choices.obsidian}:{})};
       validateConfig(config,await readJSON(path.join(ROOT,'config/roles.json')));
       await atomicJSON(path.join(existing.state,'workspace.json'),config);
       print(await syncWorkspace({...existing,config}));
     } else {
-      const ws=await initWorkspace({workspace:root,project:choices.project,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,vault:text(options.vault)});
+      const ws=await initWorkspace({workspace:root,project:choices.project,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,obsidian:choices.obsidian,vault:text(options.vault)});
       print({workspace:ws.root,project:ws.project,state:ws.state,access:ws.config.access});
     }
   } else if(command==='init') {
     assert(options.workspace && options.project,'init requires --workspace and --project');
-    const ws=await initWorkspace({...options,access:text(options.access,'approval'),vault:text(options.vault)});
+    const obsidian={
+      ...(text(options.vault)?{vault:text(options.vault)}:{}),
+      ...(text(options['vault-path'])?{vaultPath:path.resolve(text(options['vault-path']))}:{}),
+      ...(options['test-vault']===true?{testVault:true}:{}),
+    };
+    const executables=text(options['obsidian-executable'])?{obsidian:text(options['obsidian-executable'])}:{};
+    const ws=await initWorkspace({...options,access:text(options.access,'approval'),obsidian,executables});
     print({workspace:ws.root,project:ws.project,state:ws.state,access:ws.config.access});
   } else if(command==='scan') {
     const result=await scan(path.resolve(options.repo || '.'),{history:options.history===true});print(result);if(!result.ok)process.exitCode=1;

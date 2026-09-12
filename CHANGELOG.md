@@ -11,6 +11,8 @@
   SHA-256 checksum next to it.
 - `setup.cmd` and `setup.sh` start the existing installation window directly after unpacking;
   no dependency installation is needed because Claudex has no runtime packages.
+- The `obsidian` profile now collects its executable, vault identity, absolute path and
+  test-mutation boundary in the setup window instead of requiring a manual JSON edit later.
 - Release archives omit tests, CI, hooks, contributor material and dated research evidence.
   Those remain in the source repository; the installed harness keeps only runtime code,
   maintained policy, focused skills and user documentation.

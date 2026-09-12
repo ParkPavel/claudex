@@ -136,6 +136,29 @@ export async function chooseProviders(io, current = {}) {
   return { executables, models };
 }
 
+export async function chooseObsidian(io, current = {}) {
+  io.write(`${frame('Obsidian test vault', [
+    'Live checks need an explicit vault identity and absolute local path. Mutations are allowed only when you mark this as a test vault; production vaults stay read-only.',
+  ])}\n`);
+  const executable = await ask(io, 'obsidian executable', { fallback: current.executables?.obsidian ?? 'obsidian' });
+  const vault = await ask(io, 'vault name', {
+    fallback: current.obsidian?.vault ?? null,
+    validate: value => (value && !/[\r\n\0]/.test(value) ? null : 'Name the Obsidian vault exactly as the CLI knows it.'),
+  });
+  const vaultPath = await ask(io, 'absolute vault path', {
+    fallback: current.obsidian?.vaultPath ?? null,
+    validate: async value => {
+      if (!path.isAbsolute(value)) return 'Use an absolute path to the local vault.';
+      if (!(await exists(value))) return `${value} does not exist.`;
+      return null;
+    },
+  });
+  const testVault = await ask(io, 'allow test mutations in this vault? (yes/no)', {
+    fallback: current.obsidian?.testVault ? 'yes' : 'no', choices: ['yes', 'no'],
+  });
+  return { executable, config: { vault, vaultPath: path.resolve(vaultPath), testVault: testVault === 'yes' } };
+}
+
 /**
  * Who answers for each role. One line per role, in the same shape as the
  * `--assign` flag, so the window and the script are the same language:
@@ -198,6 +221,10 @@ export function summary(choices) {
     `profile    ${choices.profile}`,
     `access     ${choices.access} — ${ACCESS_TEXT[choices.access]}`,
     ...PROVIDERS.map(provider => `${provider.padEnd(10)} ${choices.executables?.[provider] ?? provider}${choices.models?.[provider] ? ` · ${choices.models[provider]}` : ''}`),
+    ...(choices.profile === 'obsidian' ? [
+      `obsidian   ${choices.executables.obsidian}`,
+      `vault      ${choices.obsidian.vault} · ${choices.obsidian.vaultPath}${choices.obsidian.testVault ? ' · test mutations allowed' : ' · read-only'}`,
+    ] : []),
     assigned.length ? 'roles' : 'roles      every role keeps its default',
     ...assigned.map(([name, assignment]) => `  ${name}: ${Object.entries(assignment).map(([key, value]) => `${key}=${value}`).join(' ')}`),
   ]);
@@ -212,6 +239,11 @@ export async function runSetup(io, { root, roles, config = null, project = null 
     access: await chooseAccess(io, config?.access ?? 'approval'),
   };
   Object.assign(choices, await chooseProviders(io, config ?? {}));
+  if (choices.profile === 'obsidian') {
+    const obsidian = await chooseObsidian(io, config ?? {});
+    choices.executables.obsidian = obsidian.executable;
+    choices.obsidian = obsidian.config;
+  }
   choices.assignments = await chooseAssignments(io, { roles: table, config: config ?? { assignments: {} }, current: config?.assignments ?? {} });
   io.write(`${summary(choices)}\n`);
   const confirmed = await ask(io, 'write this configuration? (yes/no)', { fallback: 'yes', choices: ['yes', 'no'] });
