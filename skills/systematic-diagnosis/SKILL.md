@@ -16,5 +16,3 @@ the accepted task; do not restart approval rituals.
 
 If two consecutive fixes create new defects, stop patching and reconsider ownership, state
 representation and assumptions. Record remaining unknowns and the next discriminating check.
-
-Method and limits: [evidence register](../../docs/research/evidence-register.md).

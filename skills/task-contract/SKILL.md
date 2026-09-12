@@ -16,5 +16,3 @@ unresolved conditions. A reviewer needs facts without an expected conclusion.
 
 One coordinator owns the journal. Resume by task ID, job ID and source digest. Cancel and
 confirm termination before replacing a worker. Missing readiness is not progress.
-
-Method and limits: [evidence register](../../docs/research/evidence-register.md).

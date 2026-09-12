@@ -14,6 +14,8 @@
 - Release archives omit tests, CI, hooks, contributor material and dated research evidence.
   Those remain in the source repository; the installed harness keeps only runtime code,
   maintained policy, focused skills and user documentation.
+- Focused skills no longer deep-link to the full research register; selecting a runtime skill
+  does not force an unrelated documentation read.
 - Installing Git hooks is now an explicit maintainer action (`npm run hooks:install`) rather
   than a side effect of packing the project.
 

@@ -17,5 +17,3 @@ the claim concerns the running product.
 Verify reported findings against source before accepting them. Record rejected findings with
 reasons. Read canonical budgets at their source rather than copying numbers into instructions.
 Evidence files remain local. A model's proposed PASS still needs independent adjudication.
-
-Method and limits: [evidence register](../../docs/research/evidence-register.md).
