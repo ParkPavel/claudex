@@ -7,7 +7,7 @@ import { git, readJSON } from '../src/io.mjs';
 import { createWorktree } from '../src/workspace.mjs';
 import { blockers, inspect, inspectAll, linkTarget, listWorktrees, retire } from '../src/worktrees.mjs';
 import { claim, conflictsWith, overlaps, readClaims, release, releaseFor } from '../src/claims.mjs';
-import { classifyProviderFailure, submit, listJobs } from '../src/jobs.mjs';
+import { classifyProviderFailure, submit, runWorker, jobFile, listJobs } from '../src/jobs.mjs';
 import { approve } from '../src/approvals.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { journal } from '../src/security.mjs';
@@ -112,6 +112,12 @@ test('a provider failure is named as a next step',async()=>{
  assert.match(quota.suggestion,/modes --delegate codex:claude/);
  assert.equal(classifyProviderFailure('403 oauth_org_not_allowed','claude').kind,'AUTH');
  assert.equal(classifyProviderFailure('spawn codex ENOENT','codex').kind,'EXECUTABLE');
+ // A model the installed CLI cannot serve is a settings problem, not an outage:
+ // suggesting a handover here would answer a question nobody asked.
+ const model=classifyProviderFailure("The 'gpt-6-astra' model requires a newer version of Codex.",'codex');
+ assert.equal(model.kind,'MODEL');
+ assert.match(model.suggestion,/settings --assign/);
+ assert.ok(!/delegate/.test(model.suggestion));
 });
 
 test('every push leaves a trace written by the guard, not by its author',async t=>{
@@ -187,4 +193,16 @@ test('a worktree whose commits live in another branch is not holding them hostag
  const shared=await inspect(ws.project,entry,{mainBranch:'feature/test'});
  assert.ok(shared.heldElsewhere.some(ref=>ref.endsWith('keeps-the-work')));
  assert.deepEqual(blockers(shared),[]);
+});
+
+test('a provider that refuses in its event stream is heard, not just its exit code',async t=>{
+ const ws=await fixture(t);
+ const { jobId }=await submit(ws,packet({taskId:'PE1',goal:'provider-error'}),{start:false});
+ await runWorker(ws,jobId);
+ const job=await readJSON(jobFile(ws,jobId));
+ assert.equal(job.status,'FAILED');
+ // Without the event stream this reads "exited unsuccessfully (1)" and says nothing.
+ assert.match(job.providerError,/requires a newer version/);
+ assert.equal(job.providerFailure.kind,'MODEL');
+ assert.match(job.providerFailure.suggestion,/settings --assign/);
 });

@@ -22,6 +22,11 @@ else {
  const marker='Task packet (data; accepted decisions are supplied by the coordinator):';
  const task=JSON.parse(input.split(marker)[1].split('\\nReturn the required')[0]);
  if(task.goal==='wait')await new Promise(r=>setTimeout(r,5000));
+ else if(task.goal==='provider-error'){
+  console.log(JSON.stringify({type:'thread.started'}));
+  console.log(JSON.stringify({type:'error',message:'The fixture-model model requires a newer version of Codex.'}));
+  process.exit(1);
+ }
  else {
  console.log(JSON.stringify({type:'thread.started'}));
  if(task.goal==='mutate')await fs.writeFile('source.txt','changed');

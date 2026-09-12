@@ -129,6 +129,21 @@ reason. Before removing the directory it removes the harness's own generated poi
 detaches shared dependency links, because `git worktree remove` deletes recursively and would
 otherwise follow a junction into the installation the main checkout is using.
 
+## When a provider refuses
+
+A provider states its own refusal in its event stream and still exits with a plain code. The
+worker keeps that text as `providerError` and classifies it into a next step:
+
+| Kind | What it means | What the job record suggests |
+|---|---|---|
+| `QUOTA` | the account is out of budget | open a recorded delegation of that provider's roles |
+| `MODEL` | the installed CLI does not serve the requested model | change the assignment, or upgrade that CLI |
+| `AUTH` | the session is not authorised | the same delegation route, once you know it is not a login problem |
+| `EXECUTABLE` | the command did not start | run `doctor` |
+
+Classification suggests; it never opens a delegation. Who answers for a role stays a human
+decision, and a model the CLI cannot serve is a settings problem rather than an outage.
+
 ## Reports
 
 Every push through the guard appends one line to `.local/claudex/reports/pushes.jsonl`: the

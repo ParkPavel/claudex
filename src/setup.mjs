@@ -14,20 +14,44 @@ import { ACCESS, MODEL_EXAMPLES, MODEL_PATTERN, PROVIDERS, EFFORTS, resolveAssig
 // without a terminal.
 
 const WIDTH = 76;
-const line = text => `│ ${String(text).padEnd(WIDTH - 4).slice(0, WIDTH - 4)} │`;
+const INNER = WIDTH - 4;
+const line = text => `│ ${String(text).padEnd(INNER)} │`;
 const rule = (left, right) => `${left}${'─'.repeat(WIDTH - 2)}${right}`;
 
+/**
+ * A frame that never eats its own explanation. Long text wraps at word
+ * boundaries, keeping the indentation of the line it came from, because the
+ * first version cut sentences mid-word and hid the thing it was explaining.
+ */
+export function wrap(text) {
+  const value = String(text).replace(/\s+$/, '');
+  if (value.length <= INNER) return [value];
+  // Words carry their own trailing spaces, so a line that fits keeps the column
+  // alignment it was written with; only a line too long to fit is re-flowed.
+  const indent = value.match(/^\s*/)[0];
+  const words = value.slice(indent.length).match(/\S+\s*/g) ?? [];
+  const lines = [];
+  let current = indent;
+  for (const word of words) {
+    if (`${current}${word}`.trimEnd().length > INNER && current.trim()) { lines.push(current.trimEnd()); current = `${indent}${word}`; }
+    else current += word;
+  }
+  if (current.trim()) lines.push(current.trimEnd());
+  return lines.flatMap(item => (item.length <= INNER ? [item] : item.match(new RegExp(`.{1,${INNER}}`, 'g'))));
+}
+
 export function frame(title, body) {
-  return [rule('┌', '┐'), line(title), line(''), ...body.map(line), rule('└', '┘')].join('\n');
+  return [rule('┌', '┐'), line(title), line(''), ...body.flatMap(wrap).map(line), rule('└', '┘')].join('\n');
 }
 
 export const LAYOUT = [
-  '.claudex.json          pointer to the local state directory (small, local)',
-  '.local/claudex/        configuration, jobs, evidence, approvals, reports',
-  '.local/claudex/worktrees/   isolated checkouts for writing tasks',
-  '.tmp/                  disposable scratch space',
-  'AGENTS.md, CLAUDE.md   generated entrypoints pointing at the shared contract',
-  '.codex/, .claude/, .agents/  generated native role and skill definitions',
+  '.claudex.json         pointer to the local state directory',
+  '.local/claudex/       configuration, jobs, evidence, approvals, reports',
+  '  …/worktrees/        isolated checkouts for writing tasks',
+  '.tmp/                 disposable scratch space',
+  'AGENTS.md, CLAUDE.md  generated entrypoints to the shared contract',
+  '.codex/ .claude/      generated native role definitions',
+  '.agents/              generated skill entrypoints',
 ];
 
 const ACCESS_TEXT = {
@@ -63,8 +87,7 @@ export async function projectProblem(root, candidate) {
 export async function chooseProject(io, root, current = null) {
   io.write(`${frame('Managed project', [
     `Workspace: ${root}`,
-    'Name the project folder, relative to this workspace. It must be its own Git',
-    'repository; the harness never manages the workspace root itself.',
+    'Name the project folder, relative to this workspace. It must be its own Git repository; the harness never manages the workspace root itself.',
     '',
     'These are created next to it, and none of them belong in a public repository:',
     ...LAYOUT.map(item => `  ${item}`),
@@ -75,9 +98,7 @@ export async function chooseProject(io, root, current = null) {
 export async function chooseProfile(io, current = 'generic') {
   const profiles = (await fs.readdir(path.join(ROOT, 'profiles'))).filter(name => name.endsWith('.json')).map(name => name.replace(/\.json$/, ''));
   io.write(`${frame('Project profile', [
-    'A profile carries the checks and the working instructions for a kind of',
-    'project. `generic` states the contract only; `obsidian` adds plugin checks',
-    'and live evidence through the Obsidian CLI.',
+    'A profile carries the checks and the working instructions for a kind of project. `generic` states the contract only; `obsidian` adds plugin checks and live evidence through the Obsidian CLI.',
     '',
     `Available: ${profiles.join(', ')}`,
   ])}\n`);
@@ -88,18 +109,16 @@ export async function chooseAccess(io, current = 'approval') {
   io.write(`${frame('What the harness may do without asking', [
     ...ACCESS.map(mode => `${mode.padEnd(9)} ${ACCESS_TEXT[mode]}`),
     '',
-    'Reading and reviewing are never gated: the modes differ in what may be',
-    'changed, not in what may be looked at. `approval` is the default, and an',
-    'approval is one task, one use: claudex approve <task> --reason "<why>"',
+    'Reading and reviewing are never gated: the modes differ in what may be changed, not in what may be looked at.',
+    '`approval` is the default, and an approval is one task, one use:',
+    '  claudex approve <task> --reason "<why>"',
   ])}\n`);
   return ask(io, 'access mode', { fallback: current, choices: ACCESS });
 }
 
 export async function chooseProviders(io, current = {}) {
   io.write(`${frame('Providers', [
-    'The executable each provider is launched with, and the model used when a',
-    'role does not name one of its own. Authentication stays in your own CLI',
-    'installations; nothing is copied here.',
+    'The executable each provider is launched with, and the model used when a role does not name one of its own. Authentication stays in your own CLI installations; nothing is copied here.',
     '',
     ...PROVIDERS.map(provider => `${provider.padEnd(8)} examples: ${MODEL_EXAMPLES[provider].join(', ')}`),
   ])}\n`);
@@ -144,6 +163,7 @@ export async function chooseAssignments(io, { roles, config, current = {} }) {
   io.write(`${frame('Roles and models', [
     'One line per role: provider, provider/model, or provider/model@effort.',
     'Press Enter to keep what is shown. Type "skip" to keep every remaining role.',
+    'A role that writes cannot move to a read-only provider; the window says so and asks again.',
     '',
     ...PROVIDERS.map(provider => `${provider.padEnd(8)} examples: ${MODEL_EXAMPLES[provider].join(', ')}`),
   ])}\n`);
@@ -151,13 +171,21 @@ export async function chooseAssignments(io, { roles, config, current = {} }) {
   for (const [name, role] of Object.entries(roles)) {
     const resolved = resolveAssignment({ ...config, assignments }, name, role);
     const shown = `${resolved.provider}${resolved.model ? `/${resolved.model}` : ''}@${resolved.effort}`;
-    const answer = (await io.question(`${name} (${role.authority}) [${shown}]: `)).trim();
-    if (answer === 'skip') break;
-    if (!answer) continue;
-    const { assignment, problem } = parseAssignmentSpec(answer, role);
-    if (problem) { io.write(`${problem}\n`); continue; }
-    if (Object.keys(assignment).length) assignments[name] = assignment;
-    else delete assignments[name];
+    // A refused answer re-asks this role. Moving on would apply the person's
+    // correction to the next role in the list and quietly shift every choice
+    // after it — the kind of mistake nobody notices until a job runs on the
+    // wrong model.
+    let stop = false;
+    while (!stop) {
+      const answer = (await io.question(`${name} (${role.authority}) [${shown}]: `)).trim();
+      if (answer === 'skip') return assignments;
+      if (!answer) break;
+      const { assignment, problem } = parseAssignmentSpec(answer, role);
+      if (problem) { io.write(`${problem}\n`); continue; }
+      if (Object.keys(assignment).length) assignments[name] = assignment;
+      else delete assignments[name];
+      stop = true;
+    }
   }
   return assignments;
 }
