@@ -19,6 +19,14 @@ not a conclusion to endorse. A finding needs a reproducible claim and evidence. 
 record why it does not hold. Recheck changed code after fixes. After two consecutive fixes
 introduce defects, stop patching and reconsider the model of the problem.
 
+A provider can become unavailable mid-task. The remaining provider may take the absent one's
+read-only roles only through a recorded delegation, opened by the human, naming who was absent,
+who answers instead and why. Work produced that way is a single-model proposal that owes a
+re-check to the restored provider; never report it as independent cross-provider review, and
+never let a delegation widen authority. Closing a delegation returns the roles; it does not pay
+the debt. Settle it by re-running the owed work once the provider is back, with evidence.
+An unavailable provider with no delegation blocks its roles instead of answering as someone else.
+
 Process completion is not acceptance. A command exit code, screenshot and persisted state
 prove different things. Bind evidence to the code/configuration it tested; mark changed
 snapshots stale. Report PASS, FAIL or UNKNOWN per criterion. Never convert unknown to pass.

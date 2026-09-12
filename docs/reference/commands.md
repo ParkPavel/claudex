@@ -19,6 +19,11 @@ than inferred from the currently focused application.
 | `cancel JOB` | Request cancellation; terminal state follows confirmed closure |
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
 | `check-project` | Execute the selected profile's commands in the managed project |
+| `modes [--status\|--debt\|--json]` | Show who answers for which roles and what re-check is owed |
+| `modes --delegate A:B --reason …` | Record that A is unavailable and B answers for its roles |
+| `modes --unavailable P --reason …` | Block a provider's roles without substituting anyone |
+| `modes --restore P [--note …]` | Return a provider's roles; the re-check debt survives |
+| `modes --settle ID --evidence …` | Record that the owed re-check ran, with references |
 | `scan --repo PATH [--history]` | Check index blobs or every reachable history blob |
 
 ## Packet
@@ -51,6 +56,15 @@ The initial release creates a source worktree with minimal instructions. It does
 dependencies or copy secrets. Prepare dependencies under the project's documented procedure.
 `check-project` runs the main managed checkout; checks for a worker checkout must be run by
 the coordinator in that explicit checkout. Never report one checkout's checks as another's.
+
+## Delegation between providers
+
+`modes` opens one frame in an interactive terminal and prints the same frame once anywhere
+else. A delegation is opened by the human, names the absent provider, the substitute and a
+reason, and never widens authority, chains through an unavailable provider, or turns a single
+family's second opinion into independent review. Each job produced under one carries
+`delegation`, `independence: SINGLE_MODEL` and `recheck: OWED`; restoring the provider closes
+the delegation without paying that debt. See [the delegation guide](../how-to/delegation.md).
 
 ## State configuration
 

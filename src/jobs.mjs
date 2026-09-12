@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, runtimeDigest, snapshot, withLock } from './io.mjs';
 import { prepareAdapter, readyEvent, resultEvent, validatePacket, validateResult } from './adapters.mjs';
+import { recordJob, resolve } from './modes.mjs';
 import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
 
@@ -32,14 +33,19 @@ export async function inspectJobs(ws,id) {
   return id ? jobs[0] : jobs;
 }
 export async function submit(ws, packet, { start = true } = {}) {
-  await validatePacket(packet);
+  const declared = await validatePacket(packet);
+  // Who answers for this role now. A delegated role records the substitution on
+  // the job itself, so the artifact carries its own provenance and the owed
+  // re-check is visible without reading the coordinator's notes.
+  const { delegation } = await resolve(ws, packet.role, declared);
   const id = `${packet.taskId}-${crypto.randomUUID()}`;
-  const job = { id, taskId: packet.taskId, packet, status: 'QUEUED', created: new Date().toISOString(), workerPid: null, childPid: null, acceptance: 'UNKNOWN', evidenceFreshness: 'UNVERIFIED' };
+  const job = { id, taskId: packet.taskId, packet, status: 'QUEUED', created: new Date().toISOString(), workerPid: null, childPid: null, acceptance: 'UNKNOWN', evidenceFreshness: 'UNVERIFIED', delegation, independence: delegation ? 'SINGLE_MODEL' : 'CROSS_PROVIDER', recheck: delegation ? 'OWED' : 'NONE' };
   await withLock(ws.state, async () => {
     const jobs = await listJobs(ws);
     assert(!jobs.some(j => j.taskId === packet.taskId && !TERMINAL.has(j.status)), 'Task already has an active job');
     await atomicJSON(jobFile(ws,id),job);
   });
+  if (delegation) await recordJob(ws, delegation.id, id);
   if (start) {
     const child = spawn(process.execPath,[path.join(ROOT,'bin/claudex.mjs'),'worker',id,'--workspace',ws.root],{ cwd: ws.root, detached: true, windowsHide: true, stdio: 'ignore' });
     await new Promise((resolve,reject) => { child.once('spawn',resolve); child.once('error',reject); });
@@ -66,7 +72,11 @@ export async function runWorker(ws,id) {
   let child;
   let claimed = false;
   try {
-    const role = await validatePacket(packet);
+    const declared = await validatePacket(packet);
+    // Re-resolved rather than trusted: if the delegation changed while the job
+    // waited in the queue, the answer would carry a provenance nobody agreed to.
+    const { role, delegation } = await resolve(ws,packet.role,declared);
+    assert(JSON.stringify(delegation?.id ?? null) === JSON.stringify(job.delegation?.id ?? null),'Delegation changed after this job was queued; resubmit it under the current arrangement');
     // A worker owns its own job record after claiming it under the common coordinator lock.
     const queueDeadline = Date.now() + ws.config.runTimeoutMs;
     while (!claimed) {
@@ -107,9 +117,14 @@ export async function runWorker(ws,id) {
     job.before = await snapshot(repo);
     job.configurationDigest = await runtimeDigest(ws);
     const adapter = await prepareAdapter(ws,packet,role);
-    job.runtime = { provider:adapter.provider, executable:adapter.spec.identity, version:adapter.version, model:adapter.model, effort:adapter.effort, authority:packet.authority };
+    job.runtime = { provider:adapter.provider, executable:adapter.spec.identity, version:adapter.version, model:adapter.model, effort:adapter.effort, authority:packet.authority, delegation };
     const localProfile = path.join(ws.state,'project-profile.md');
     let prompt = `${await fs.readFile(path.join(ROOT,'config/core.md'),'utf8')}\n\nRole: ${packet.role}\n${role.purpose}\n\nProject profile:\n${profile.instructions}\n`;
+    // The substitute has to know it is one, or it will report a single family's
+    // second opinion as an independent cross-provider check.
+    if (delegation) prompt += `
+You are answering in place of the ${delegation.from} role ${delegation.role}, because: ${delegation.reason}. Your verdict is recorded as a single-model proposal that owes a re-check to ${delegation.from}. Do not describe it as independent cross-provider review.
+`;
     if (await exists(localProfile)) prompt += await fs.readFile(localProfile,'utf8');
     for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
     prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
@@ -169,6 +184,9 @@ export async function runWorker(ws,id) {
     await fs.writeFile(path.join(artifactDir,'result.json'),JSON.stringify(result,null,2),{flag:'wx',mode:0o600});
     // A model verdict is a proposal. An independent acceptance record remains mandatory.
     job.proposedAcceptance = result.criteria.some(c=>c.status==='FAIL') ? 'FAIL' : result.criteria.some(c=>c.status==='UNKNOWN') ? 'UNKNOWN' : 'PASS';
+    // A substitute's verdict is one model reviewing what its own family produced.
+    // It stays a proposal with an explicit debt until the absent provider returns.
+    if (delegation) job.recheck = 'OWED';
     await save('COMPLETED',{exit,acceptance:'UNKNOWN'});
   } catch (error) {
     if (child) await stopTree(child);
