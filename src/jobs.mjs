@@ -5,6 +5,9 @@ import { spawn } from 'node:child_process';
 import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, runtimeDigest, snapshot, withLock } from './io.mjs';
 import { prepareAdapter, readyEvent, resultEvent, validatePacket, validateResult } from './adapters.mjs';
 import { recordJob, resolve } from './modes.mjs';
+import { resolveAssignment } from './config.mjs';
+import { consume, requireWriteAuthority } from './approvals.mjs';
+import { claim, release } from './claims.mjs';
 import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
 
@@ -34,18 +37,26 @@ export async function inspectJobs(ws,id) {
 }
 export async function submit(ws, packet, { start = true } = {}) {
   const declared = await validatePacket(packet);
-  // Who answers for this role now. A delegated role records the substitution on
-  // the job itself, so the artifact carries its own provenance and the owed
-  // re-check is visible without reading the coordinator's notes.
-  const { delegation } = await resolve(ws, packet.role, declared);
+  // What this installation lets a writer do, before anything is queued.
+  const { access, approval } = await requireWriteAuthority(ws, packet);
+  // Who answers for this role now: the role's own default, what the setup
+  // window assigned to it, and any open delegation, in that order. A delegated
+  // role records the substitution on the job itself, so the artifact carries its
+  // own provenance and the owed re-check is visible without reading notes.
+  const { delegation } = await resolve(ws, packet.role, resolveAssignment(ws.config, packet.role, declared));
   const id = `${packet.taskId}-${crypto.randomUUID()}`;
-  const job = { id, taskId: packet.taskId, packet, status: 'QUEUED', created: new Date().toISOString(), workerPid: null, childPid: null, acceptance: 'UNKNOWN', evidenceFreshness: 'UNVERIFIED', delegation, independence: delegation ? 'SINGLE_MODEL' : 'CROSS_PROVIDER', recheck: delegation ? 'OWED' : 'NONE' };
+  const job = { id, taskId: packet.taskId, packet, status: 'QUEUED', created: new Date().toISOString(), workerPid: null, childPid: null, acceptance: 'UNKNOWN', evidenceFreshness: 'UNVERIFIED', delegation, independence: delegation ? 'SINGLE_MODEL' : 'CROSS_PROVIDER', recheck: delegation ? 'OWED' : 'NONE', access, approval };
   await withLock(ws.state, async () => {
     const jobs = await listJobs(ws);
     assert(!jobs.some(j => j.taskId === packet.taskId && !TERMINAL.has(j.status)), 'Task already has an active job');
     await atomicJSON(jobFile(ws,id),job);
   });
   if (delegation) await recordJob(ws, delegation.id, id);
+  // Only writing work claims a scope. Two reviewers reading the same files are
+  // not a collision; two writers are, and that is the collision this exists for.
+  if (packet.authority === 'workspace-write') {
+    await claim(ws, { id, owner: 'job', ref: `${packet.taskId} (${packet.role})`, paths: packet.paths, overlap: packet.overlap?.reason ?? null });
+  }
   if (start) {
     const child = spawn(process.execPath,[path.join(ROOT,'bin/claudex.mjs'),'worker',id,'--workspace',ws.root],{ cwd: ws.root, detached: true, windowsHide: true, stdio: 'ignore' });
     await new Promise((resolve,reject) => { child.once('spawn',resolve); child.once('error',reject); });
@@ -75,7 +86,7 @@ export async function runWorker(ws,id) {
     const declared = await validatePacket(packet);
     // Re-resolved rather than trusted: if the delegation changed while the job
     // waited in the queue, the answer would carry a provenance nobody agreed to.
-    const { role, delegation } = await resolve(ws,packet.role,declared);
+    const { role, delegation } = await resolve(ws,packet.role,resolveAssignment(ws.config,packet.role,declared));
     assert(JSON.stringify(delegation?.id ?? null) === JSON.stringify(job.delegation?.id ?? null),'Delegation changed after this job was queued; resubmit it under the current arrangement');
     // A worker owns its own job record after claiming it under the common coordinator lock.
     const queueDeadline = Date.now() + ws.config.runTimeoutMs;
@@ -93,6 +104,9 @@ export async function runWorker(ws,id) {
       if (!claimed) { assert(Date.now() < queueDeadline,'Queue deadline exceeded'); await new Promise(r=>setTimeout(r,250)); }
     }
     assert((await checkEntrypoints(ws)).length === 0,'Generated entrypoints drifted; run doctor');
+    // The permit is spent here, by the worker that uses it, so one approval
+    // cannot start a second writer with the same task name.
+    if (packet.authority === 'workspace-write') job.approval = await consume(ws,packet.taskId) ?? job.approval;
     let repo = ws.project;
     if (packet.worktree) {
       repo = await contained(ws.root,path.resolve(ws.root,packet.worktree));
@@ -189,11 +203,36 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     if (delegation) job.recheck = 'OWED';
     await save('COMPLETED',{exit,acceptance:'UNKNOWN'});
   } catch (error) {
+    job.providerFailure = classifyProviderFailure(error.message,job.runtime?.provider);
     if (child) await stopTree(child);
     if (!claimed) {
       const current = await readJSON(file);
       if (current.status !== 'QUEUED') return;
     }
-    await save('FAILED',{error:error.message,acceptance:'UNKNOWN'});
+    await save('FAILED',{error:error.message,acceptance:'UNKNOWN',providerFailure:job.providerFailure ?? null});
+  } finally {
+    // A finished job stops holding its scope, whatever it finished as.
+    if (TERMINAL.has(job.status)) await release(ws,id).catch(()=>{});
   }
+}
+
+const FAILURE_SIGNATURES = [
+  [/usage limit|quota|rate.?limit|insufficient_quota|credit/i,'QUOTA'],
+  [/oauth|unauthori[sz]ed|forbidden|401|403|not allowed|login/i,'AUTH'],
+  [/ENOENT|not recognized|command not found|no such file/i,'EXECUTABLE'],
+];
+
+/**
+ * Name the shape of a provider failure, so that "Codex ran out" reaches a person
+ * as a next step rather than as a stack trace. Classification suggests; it never
+ * opens a delegation, because who answers for a role is a human decision.
+ */
+export function classifyProviderFailure(message,provider) {
+  if (!message) return null;
+  for (const [pattern,kind] of FAILURE_SIGNATURES) {
+    if (!pattern.test(message)) continue;
+    const other = provider === 'codex' ? 'claude' : 'codex';
+    return { kind, provider: provider ?? null, suggestion: kind === 'EXECUTABLE' || !provider ? 'Run claudex doctor: the provider executable did not start.' : `If ${provider} is unavailable, hand its roles over on the record: claudex modes --delegate ${provider}:${other} --reason "<why>"` };
+  }
+  return null;
 }

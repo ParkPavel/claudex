@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { migrateConfig, validateConfig } from './config.mjs';
 
 export const exec = promisify(execFile);
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -41,10 +42,15 @@ export async function resolveWorkspace(start = process.cwd()) {
       const pointer = await readJSON(descriptor);
       assert(pointer.schemaVersion === 1, 'Unsupported workspace descriptor');
       const state = await contained(cursor, path.resolve(cursor, pointer.state));
-      const config = await readJSON(path.join(state, 'workspace.json'));
+      const stored = await readJSON(path.join(state, 'workspace.json'));
+      // An older file is read as this version understands it. The migration
+      // stays in memory until `sync` writes it down, so reading a workspace
+      // never changes it.
+      const { config, migrated, from } = migrateConfig(stored);
+      validateConfig(config, await readJSON(path.join(ROOT, 'config/roles.json')));
       const project = await contained(cursor, path.resolve(cursor, config.project));
       assert(path.resolve((await git(project, ['rev-parse', '--show-toplevel'])).trim()) === path.resolve(project), 'Managed project must be a Git root');
-      return { root: cursor, state, project, config };
+      return { root: cursor, state, project, config, storedVersion: from, migrated };
     }
     const next = path.dirname(cursor);
     assert(next !== cursor, 'No .claudex.json found. Run claudex init from your workspace.');

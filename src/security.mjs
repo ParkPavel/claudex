@@ -96,5 +96,25 @@ export async function prePush(repo, remote, url, input) {
     assert(localRef.startsWith('refs/') || localRef === 'HEAD', 'Invalid local ref');
   }
   if (usedPermit) await fs.unlink(permitPath);
+  await journal(repo, { remote, url, refs: lines.map(line => { const [localRef, localSha, remoteRef, remoteSha] = line.split(' '); return { localRef, localSha, remoteRef, remoteSha }; }) });
   return { ok: true, remote, refsChecked: lines.length };
+}
+
+/**
+ * Every push crosses this hook, so this is where a push can be recorded by
+ * something other than the account of whoever made it. A report written by hand
+ * afterwards is a claim; a line appended here is a trace.
+ *
+ * Journalling never blocks a push: outside a workspace, or if the state
+ * directory cannot be written, the guard has already done its real work.
+ */
+export async function journal(repo, entry) {
+  try {
+    const { resolveWorkspace } = await import('./io.mjs');
+    const ws = await resolveWorkspace(repo);
+    const file = path.join(ws.state, 'reports', 'pushes.jsonl');
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.appendFile(file, `${JSON.stringify({ at: new Date().toISOString(), repo, ...entry })}\n`, { mode: 0o600 });
+    return file;
+  } catch { return null; }
 }
