@@ -8,6 +8,7 @@ import { submit, runWorker, inspectJobs, cancel, jobFile, listJobs, TERMINAL } f
 import { scan, preCommit, prePush } from '../src/security.mjs';
 import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
+import { withIsolatedCopy } from '../src/isolate.mjs';
 import { delegate, interactive, markUnavailable, panel, parseDelegationSpec, restore, settle, status as modeStatus } from '../src/modes.mjs';
 import { approve, pending } from '../src/approvals.mjs';
 import { claim, readClaims, release, releaseFor } from '../src/claims.mjs';
@@ -216,7 +217,7 @@ State, evidence and credentials never belong in the public repository.`);
       const dir=path.join(ws.state,'artifacts',`checks-${Date.now()}`);await fs.mkdir(dir,{recursive:true});
       for(const [i,check] of profile.checks.entries()) {
         const resolvedArgs=check.args.map(arg=>arg.replaceAll('{artifactDirectory}',dir));
-        try {const run=await runCommand(check.command,resolvedArgs,{cwd:ws.project,timeout:900000,maxBuffer:64*1024*1024});await fs.writeFile(path.join(dir,`${i}.log`),run.stdout+run.stderr);results.push({command:check,status:'PASS'});}
+        try {const exec=cwd=>runCommand(check.command,resolvedArgs,{cwd,timeout:900000,maxBuffer:64*1024*1024});const run=check.isolate?await withIsolatedCopy(ws.project,exec):await exec(ws.project);await fs.writeFile(path.join(dir,`${i}.log`),run.stdout+run.stderr);results.push({command:check,status:'PASS'});}
         catch(e){await fs.writeFile(path.join(dir,`${i}.log`),(e.stdout||'')+(e.stderr||''));results.push({command:check,status:'FAIL'});}
       }
       const after=await snapshot(ws.project);

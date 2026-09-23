@@ -68,6 +68,14 @@ Verification uses the declared command and args directly, stores stdout/stderr l
 binds them to before/after source, runtime configuration and specification digests. A command
 failure is retained. A source/configuration change during execution makes its evidence stale.
 Do not use verify for deployment or another mutation that changes the snapshot being tested.
+A check that must mutate files, such as a build that rewrites a tracked bundle, sets
+`"isolate": true`: it runs in a disposable copy of every tracked and non-ignored file as it
+is on disk, with `node_modules` linked in, so the checkout and its evidence stay current. Add
+`"reproduces": [{"output": "main.js", "against": ["main.js", "@workspace/<vault>/.obsidian/plugins/<id>/main.js"]}]`
+to compare the fresh output with the tracked file and a deployed copy; each pair reports
+MATCH, DIFFER or MISSING and anything but MATCH fails the check. `"eol": "ignore"` compares
+text after dropping CR, for checkouts that convert line endings; such a match is marked
+`normalized` and is not a byte match.
 Source snapshots cover tracked and non-ignored Git files; ignored bundles need separate hashes.
 
 Record real source/UI/persistence/review observations with `task record <id> --params <json>`.

@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { assert, atomicJSON, contained, exists, git, inside, readJSON, runtimeDigest, sha, snapshot, withLock } from './io.mjs';
 import { runCommand } from './process.mjs';
+import { compareReproduction, withIsolatedCopy } from './isolate.mjs';
 import { migrateConfig } from './config.mjs';
 
 const ID=/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,70}$/;
@@ -43,6 +44,18 @@ export function validateContract(c) {
     assert(nonempty(check.command)&&Array.isArray(check.args)&&check.args.every(a=>typeof a==='string'),'Check needs command and string args');
     assert(check.timeoutMs===undefined||(Number.isInteger(check.timeoutMs)&&check.timeoutMs>0&&check.timeoutMs<=900000),'Check timeout must be 1..900000 ms');
     assert(check.criteria.every(k=>c.criteria.find(e=>e.id===k).requires.includes('automated')),'Checks must map to automated criteria');
+    assert(check.isolate===undefined||typeof check.isolate==='boolean','isolate must be boolean');
+    if(check.reproduces!==undefined) {
+      // A reproduction compares a build's output with a tracked file; run in the
+      // checkout, that build would overwrite the very file it is compared with.
+      assert(check.isolate===true,'reproduces requires an isolated check');
+      assert(Array.isArray(check.reproduces)&&check.reproduces.length,'reproduces must be a nonempty array');
+      for(const r of check.reproduces) {
+        assert(r&&relative(r.output)&&Array.isArray(r.against)&&r.against.length,'Each reproduction needs an output and targets');
+        assert(r.eol===undefined||r.eol==='ignore','eol may only be "ignore"');
+        assert(r.against.every(a=>typeof a==='string'&&relative(a.startsWith('@workspace/')?a.slice(11):a)),'Reproduction targets must be bounded relative paths');
+      }
+    }
   }
   const tasks=new Map(c.tasks.map(e=>[e.id,e]));
   for(const task of c.tasks) assert(nonempty(task.text)&&strings(task.dependsOn)&&task.dependsOn.every(k=>tasks.has(k)),'Task needs text and known dependencies');
@@ -152,17 +165,26 @@ export async function verifyTask(ws,taskId,checkId) {
   const t=await readyTask(ws,taskId),check=t.contract.checks.find(c=>c.id===checkId);
   assert(check,'Unknown check ID');
   const before=await context(ws,t),evidenceId=crypto.randomUUID();
-  let status='PASS',log='',error=null;
-  try {
-    const result=await runCommand(check.command,check.args,{cwd:t.repo,timeout:check.timeoutMs??120000,maxBuffer:8*1024*1024});
-    log=result.stdout+result.stderr;
-  } catch(e) { status='FAIL';error=e.message;log=`${e.stdout??''}${e.stderr??''}\n${e.message}\n`; }
+  let status='PASS',log='',error=null,reproduction;
+  const run=async cwd=>{
+    try {
+      const result=await runCommand(check.command,check.args,{cwd,timeout:check.timeoutMs??120000,maxBuffer:8*1024*1024});
+      log=result.stdout+result.stderr;
+    } catch(e) { status='FAIL';error=e.message;log=`${e.stdout??''}${e.stderr??''}\n${e.message}\n`; }
+    if(check.reproduces&&status==='PASS') {
+      reproduction=await compareReproduction(ws,t.repo,cwd,check.reproduces);
+      if(reproduction.some(r=>r.result!=='MATCH')) { status='FAIL';error='Build output does not reproduce its targets'; }
+      log+=`\nreproduction:\n${reproduction.map(r=>`${r.result} ${r.output} -> ${r.against}`).join('\n')}\n`;
+    }
+  };
+  if(check.isolate)await withIsolatedCopy(t.repo,run);else await run(t.repo);
   const after=await context(ws,t);
   const logFile=await contained(ws.state,path.join(t.dir,'logs',`${evidenceId}.log`));
   await fs.mkdir(path.dirname(logFile),{recursive:true});
   await fs.writeFile(logFile,log,{flag:'wx',mode:0o600});
   const freshness=before.source.digest===after.source.digest&&before.configurationDigest===after.configurationDigest&&before.contractDigest===after.contractDigest?'CURRENT':'STALE';
   return saveEvidence(ws,t,{id:evidenceId,taskId,checkId,criteria:check.criteria,kind:'automated',status,freshness,error,
+    ...(check.isolate?{isolated:true}:{}),...(reproduction?{reproduction}:{}),
     before:before.source,after:after.source,configurationDigest:before.configurationDigest,contractDigest:before.contractDigest,
     artifact:norm(path.relative(ws.root,logFile)),artifactSha256:sha(await fs.readFile(logFile)),createdAt:new Date().toISOString(),attested:false});
 }

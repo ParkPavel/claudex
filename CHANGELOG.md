@@ -9,6 +9,11 @@
   the packet promised, the stage it stopped at, the provider and model, uncommitted changes
   left in its repository and what to check before retrying. `status --summary` points at it.
   A cancellation is a person's decision and gets no postmortem.
+- Task checks can run isolated (`isolate`) in a disposable copy with linked `node_modules`,
+  and compare a build's output with tracked and deployed files (`reproduces`, optional
+  `eol: "ignore"`). The obsidian profile's build check in `check-project` is isolated too, so
+  neither rewrites the checkout's bundle.
+- The result schema states that findings are defects only; confirmations go to evidence.
 
 ## 0.2.0 — 2026-09-13
 
