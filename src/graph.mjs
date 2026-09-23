@@ -54,7 +54,11 @@ export async function buildGraph(ws, { codeOnly = false } = {}) {
   const args = ['-m', 'graphify', 'extract', ws.project, '--out', out, '--no-gitignore', ...excludes,
     ...(codeOnly ? ['--code-only'] : ['--backend', cfg.backend ?? 'claude-cli'])];
   const env = { ...process.env, PYTHONPATH: [path.join(ROOT, 'vendor'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
-    PYTHONIOENCODING: 'utf-8', PYTHONHASHSEED: '0', ...(cfg.model ? { GRAPHIFY_CLAUDE_CLI_MODEL: cfg.model } : {}) };
+    PYTHONIOENCODING: 'utf-8', PYTHONHASHSEED: '0',
+    // Absolute, so the incremental path's word-count index cannot fall back to
+    // <project>/graphify-out and write into the product repository.
+    GRAPHIFY_OUT: path.join(out, 'graphify-out'),
+    ...(cfg.model ? { GRAPHIFY_CLAUDE_CLI_MODEL: cfg.model } : {}) };
   const before = await snapshot(ws.project);
   let log;
   try { log = await run(cfg.python, args, { cwd: neutral, env }); }
@@ -75,6 +79,12 @@ export async function buildGraph(ws, { codeOnly = false } = {}) {
     snapshot: before, stable: before.digest === after.digest,
     counts: countGraph(traced.graph), docCode: linked.stats, trace: traced.trace, graphify: graphifyVersion(log),
   };
+  if (!state.stable) {
+    // Something wrote into the product while the graph was built; the graph is
+    // not CURRENT for any snapshot. Name what appeared so it can be removed.
+    const changed = (await git(ws.project, ['status', '--porcelain=v1', '--untracked-files=all'])).split('\n').filter(Boolean).slice(0, 20);
+    state.warning = 'The project changed during the build; the graph is not current. Changed now: ' + (changed.join('; ') || 'nothing (a transient change)');
+  }
   await atomicJSON(stateFile(ws), state);
   await fs.writeFile(path.join(out, 'build.log'), log ?? '');
   return state;
