@@ -76,3 +76,24 @@ Tree-sitter parses `.svelte` files only partly: on one project about 210 files h
 errors and the graph missed about a fifth of the callers that `git grep` found. Confirm a
 "no callers" answer in source. Graphify may exclude a file it considers sensitive by name
 (a design-token stylesheet was one); references to it appear as `UNVERIFIED`.
+
+## Build trace
+
+Parsers guess; the bundler knows. For an esbuild project, set in local `workspace.json`:
+
+```json
+"graph": { "trace": { "script": "esbuild.config.mjs", "args": ["production"],
+                      "mergedInto": { "main.css": "styles.css" } } }
+```
+
+`graph trace` runs that script unchanged in an isolated copy of the snapshot (the checkout,
+its bundle and `node_modules` are untouched) and records esbuild's metafile: a loader hook
+hands the script's `import esbuild` a shim that calls the real `build` with `metafile: true`.
+The next `build`/`relink` merges it, only when it describes the same snapshot, as EXTRACTED
+edges: imports the AST pass missed, `bundled_into` (source → generated file, with bytes) and
+`merged_into` for post-build merges you declare. `graph-state.json` keeps the counts, the
+inputs that contributed no bytes (re-export barrels as often as dead code — inspect, don't
+delete on sight) and project inputs the graph lacks.
+
+Exclusions are gitignore patterns: anchor root folders as `/name/**`. A bare `templates`
+also matches `src/lib/templates`, and Graphify does not honour the `/name/` form.

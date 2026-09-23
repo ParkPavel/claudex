@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT, assert, atomicJSON, exists, git, readJSON, snapshot } from './io.mjs';
+import { mergeTrace, traceBuild } from './trace.mjs';
 
 // Code graph for the managed project, built by the vendored Graphify
 // (vendor/graphify, see vendor/graphify/UPSTREAM.md) and owned by Claudex:
@@ -14,7 +15,10 @@ import { ROOT, assert, atomicJSON, exists, git, readJSON, snapshot } from './io.
 // through os.execvpe to pin the seed, and on Windows that re-exec through a uv
 // venv launcher dies with an access violation (0xC0000005) and no output.
 
-const DEFAULT_EXCLUDES = ['node_modules', '.git', 'releases', '*.map', 'images', 'coverage', 'package-lock.json', 'data.json'];
+// Root folders are anchored as /name/** : a bare name matches at any depth (an
+// exclude meant for templates/ also dropped src/lib/templates/), and Graphify
+// does not honour the /name/ form.
+const DEFAULT_EXCLUDES = ['node_modules', '.git', '/releases/**', '*.map', '/images/**', '/coverage/**', 'package-lock.json', 'data.json'];
 const CODE = /\.(ts|tsx|svelte|mjs|cjs|js|jsx|py|ps1|css)$/i;
 const DOC = /\.md$/i;
 
@@ -62,13 +66,14 @@ export async function buildGraph(ws, { codeOnly = false } = {}) {
   finally { await fs.rm(neutral, { recursive: true, force: true }).catch(() => {}); }
   const graph = await readJSON(graphFile(ws));
   const linked = await linkDocs(ws.project, graph);
-  await fs.writeFile(linkedFile(ws), JSON.stringify(linked.graph));
+  const traced = await withTrace(ws, linked.graph, before.digest);
+  await fs.writeFile(linkedFile(ws), JSON.stringify(traced.graph));
   const after = await snapshot(ws.project);
   const state = {
     schemaVersion: 1, builtAt: new Date().toISOString(), codeOnly,
     head: (await git(ws.project, ['rev-parse', 'HEAD'])).trim(),
     snapshot: before, stable: before.digest === after.digest,
-    counts: countGraph(linked.graph), docCode: linked.stats, graphify: graphifyVersion(log),
+    counts: countGraph(traced.graph), docCode: linked.stats, trace: traced.trace, graphify: graphifyVersion(log),
   };
   await atomicJSON(stateFile(ws), state);
   await fs.writeFile(path.join(out, 'build.log'), log ?? '');
@@ -203,8 +208,33 @@ export async function relinkGraph(ws) {
   assert(await exists(stateFile(ws)), 'No graph to relink; run graph build');
   const state = await readJSON(stateFile(ws));
   const linked = await linkDocs(ws.project, await readJSON(graphFile(ws)));
-  await fs.writeFile(linkedFile(ws), JSON.stringify(linked.graph));
-  const next = { ...state, relinkedAt: new Date().toISOString(), counts: countGraph(linked.graph), docCode: linked.stats };
+  const traced = await withTrace(ws, linked.graph, state.snapshot?.digest);
+  await fs.writeFile(linkedFile(ws), JSON.stringify(traced.graph));
+  const next = { ...state, relinkedAt: new Date().toISOString(), counts: countGraph(traced.graph), docCode: linked.stats, trace: traced.trace };
   await atomicJSON(stateFile(ws), next);
   return next;
+}
+
+const traceFile = ws => path.join(graphDir(ws), 'build-trace.json');
+
+/** Record the bundler's metafile for the current snapshot (graph.trace in workspace.json). */
+export async function traceGraph(ws) {
+  const cfg = ws.config.graph?.trace;
+  assert(cfg?.script, 'Set graph.trace.script (and args) in local workspace.json, e.g. esbuild.config.mjs production');
+  const before = await snapshot(ws.project);
+  const { metafile, log } = await traceBuild(ws.project, { script: cfg.script, args: cfg.args ?? [] });
+  const after = await snapshot(ws.project);
+  await fs.mkdir(graphDir(ws), { recursive: true });
+  await atomicJSON(traceFile(ws), { schemaVersion: 1, tracedAt: new Date().toISOString(), snapshot: before, stable: before.digest === after.digest, mergedInto: cfg.mergedInto ?? {}, metafile });
+  await fs.writeFile(path.join(graphDir(ws), 'build-trace.log'), log ?? '');
+  return exists(stateFile(ws)).then(has => has ? relinkGraph(ws) : { traced: true, snapshot: before });
+}
+
+/** Apply the build trace only when it describes the same snapshot as the graph. */
+async function withTrace(ws, graph, snapshotDigest) {
+  if (!(await exists(traceFile(ws)))) return { graph, trace: { status: 'MISSING' } };
+  const t = await readJSON(traceFile(ws));
+  if (!t.stable || t.snapshot?.digest !== snapshotDigest) return { graph, trace: { status: 'STALE', tracedAt: t.tracedAt } };
+  const merged = mergeTrace(graph, t.metafile, { mergedInto: t.mergedInto });
+  return { graph: merged.graph, trace: { status: 'CURRENT', tracedAt: t.tracedAt, ...merged.stats } };
 }

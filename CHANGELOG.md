@@ -22,6 +22,9 @@
   code links and list UNVERIFIED paths; a CURRENT graph's slice for a job's paths is projected
   into its prompt. See docs/how-to/graph.md and docs/explanation/lineage.md (attribution and
   thanks to Spec Kit, Superpowers and Graphify).
+- `graph trace` records the bundler's metafile from the project's own esbuild script, run
+  unchanged in an isolated copy, and merges it as EXTRACTED import, `bundled_into` and
+  `merged_into` edges. Default exclusions are anchored to the root.
 
 ## 0.2.0 — 2026-09-13
 
