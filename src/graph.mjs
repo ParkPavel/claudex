@@ -136,7 +136,19 @@ export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
   const pathRe = /(?:^|[\s`(\["'])((?:\.\/)?(?:[\w@-]+\/)+[\w.@-]+\.(?:ts|tsx|svelte|mjs|cjs|js|jsx|py|ps1|css))/g;
   const symRe = /`([A-Za-z_$][\w$]{3,})(?:\(\))?`/g;
   const seen = new Set(g.links.map(e => `${e.source}>${e.target}`));
-  const stats = { extracted: 0, inferred: 0, ambiguous: 0, unverified: [] };
+  const stats = { extracted: 0, inferred: 0, ambiguous: 0, withheld: 0, unverified: [] };
+  // Graphify withholds some tracked files it takes for secrets (a design-token
+  // stylesheet, by name). A document naming one still names a real file: give it
+  // a node, marked, rather than calling the reference unverified.
+  let tracked = new Set();
+  try { tracked = new Set((await git(repo, ['ls-files', '-z'])).split('\0').filter(Boolean)); } catch {}
+  const withheld = rel => {
+    if (!tracked.has(rel) || !CODE.test(rel)) return null;
+    const node = { id: `withheld_${rel.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`, label: path.posix.basename(rel), source_file: rel, file_type: 'code', withheld: true, _origin: 'claudex-link-docs' };
+    g.nodes.push(node); fileNode.set(rel, node); stats.withheld++;
+    return node;
+  };
+  const context = (target, fallback) => (target.withheld ? 'withheld-by-graphify' : fallback);
   for (const [file, dn] of docNode) {
     let text;
     try { text = await fs.readFile(path.join(repo, file), 'utf8'); } catch { continue; }
@@ -151,11 +163,11 @@ export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
         if (!githubRepo || m[1].toLowerCase() !== githubRepo.toLowerCase()) continue;
         // Sentence punctuation after a bare URL is not part of the path.
         const rel = decodeURIComponent(m[2]).replace(/[.,;:!?'"]+$/, '');
-        const target = fileNode.get(rel);
+        const target = fileNode.get(rel) ?? withheld(rel);
         if (!target) { if (CODE.test(rel)) stats.unverified.push({ doc: file, line: i + 1, path: rel }); continue; }
         if (seen.has(`${dn.id}>${target.id}`)) continue;
         seen.add(`${dn.id}>${target.id}`);
-        g.links.push({ source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, context: 'github-url', source_file: file, source_location: at, _origin: 'claudex-link-docs' });
+        g.links.push({ source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, context: context(target, 'github-url'), source_file: file, source_location: at, _origin: 'claudex-link-docs' });
         stats.extracted++;
       }
       line = line.replace(/https:\/\/\S+/g, '');
@@ -163,7 +175,8 @@ export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
         const rel = m[1].replace(/^\.\//, '');
         // Repository-relative first, then relative to the document's own folder
         // (a module README names its neighbours as `frontmatter/datasource.ts`).
-        let target = fileNode.get(rel) ?? fileNode.get(path.posix.join(path.posix.dirname(file.replaceAll('\\', '/')), rel));
+        const beside = path.posix.join(path.posix.dirname(file.replaceAll('\\', '/')), rel);
+        let target = fileNode.get(rel) ?? fileNode.get(beside) ?? withheld(rel) ?? withheld(beside);
         let inferred = false;
         if (!target) {
           // A shortened path (`engine/aggregate.ts` for src/lib/engine/aggregate.ts)
@@ -176,7 +189,7 @@ export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
         seen.add(`${dn.id}>${target.id}`);
         g.links.push(inferred
           ? { source: dn.id, target: target.id, relation: 'documents', confidence: 'INFERRED', confidence_score: 0.8, context: 'path-suffix', source_file: file, source_location: at, _origin: 'claudex-link-docs' }
-          : { source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, source_file: file, source_location: at, _origin: 'claudex-link-docs' });
+          : { source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, ...(target.withheld ? { context: 'withheld-by-graphify' } : {}), source_file: file, source_location: at, _origin: 'claudex-link-docs' });
         if (inferred) stats.inferred++; else stats.extracted++;
       }
       for (const m of line.matchAll(symRe)) {

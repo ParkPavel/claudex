@@ -49,7 +49,11 @@ After Graphify, Claudex adds deterministic document → code edges:
   to the document's own folder. A bare file name (`main.ts`) is too ambiguous to link;
 - `INFERRED` — a document names a unique camel/Pascal/snake symbol in backticks, or a
   shortened path (`engine/aggregate.ts`) that exactly one file ends with;
-- `UNVERIFIED` — a named path with no file node; listed in `graph-state.json`, never an edge.
+- a tracked file Graphify withheld (it skips files it takes for secrets, such as a design-token
+  stylesheet) gets a node marked `withheld` when a document names it, and the edge carries
+  `context: withheld-by-graphify`;
+- `UNVERIFIED` — a named path that is neither a file node nor a tracked file; listed in
+  `graph-state.json`, never an edge.
 
 `graph relink` reruns only this linker on the existing Graphify output, without a new
 extraction. `status` is `CURRENT` only when the repository snapshot equals the one the graph was built

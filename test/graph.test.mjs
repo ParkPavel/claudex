@@ -138,3 +138,17 @@ test('a blob URL links only for this repository, and trailing punctuation is not
   const e=g.links.filter(x=>x.source==='docs_urls2'&&x.context==='github-url');
   assert.deepEqual(e.map(x=>[x.target,x.source_location]),[['src_view','L1']]);
 });
+
+test('a tracked file Graphify withheld still gets a node when a document names it',async t=>{
+  const {project,graph}=await fixture(t);
+  await fs.mkdir(path.join(project,'src','ui'),{recursive:true});
+  await fs.writeFile(path.join(project,'src','ui','tokens.css'),':root{}\n');
+  git(project,'add','src/ui/tokens.css');
+  await fs.writeFile(path.join(project,'docs','style.md'),'Tokens live in src/ui/tokens.css and not in src/ui/ghost.css.\n');
+  graph.nodes.push({id:'docs_style',label:'Style',source_file:'docs/style.md',file_type:'document'});
+  const {graph:g,stats}=await linkDocs(project,graph);
+  const node=g.nodes.find(n=>n.source_file==='src/ui/tokens.css');
+  assert.ok(node&&node.withheld===true,'a node is created for the tracked but withheld file');
+  assert.ok(g.links.some(e=>e.source==='docs_style'&&e.target===node.id&&e.confidence==='EXTRACTED'&&e.context==='withheld-by-graphify'));
+  assert.deepEqual(stats.unverified.filter(u=>u.doc==='docs/style.md').map(u=>u.path),['src/ui/ghost.css'],'an untracked path stays unverified');
+});
