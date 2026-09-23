@@ -168,6 +168,7 @@ State, evidence and credentials never belong in the public repository.`);
         provider:job.runtime?.provider??null,model:job.runtime?.model??null,
         usage:job.usage??null,
         error:job.error??null,
+        postmortem:job.postmortem??null,
       })) : result);
     }
     else if(command==='task') {

@@ -85,6 +85,7 @@ export async function runWorker(ws,id) {
   const artifactDir = path.join(ws.state,'artifacts',id);
   let child;
   let claimed = false;
+  let repo = ws.project;
   try {
     const declared = await validatePacket(packet);
     const taskContract = await validateTaskPacket(ws,packet);
@@ -92,6 +93,7 @@ export async function runWorker(ws,id) {
     // Re-resolved rather than trusted: if the delegation changed while the job
     // waited in the queue, the answer would carry a provenance nobody agreed to.
     const { role, delegation } = await resolve(ws,packet.role,resolveAssignment(ws.config,packet.role,declared));
+    job.requested = { provider:role.provider, model:packet.model || role.model || ws.config.models?.[role.provider] || null, effort:packet.effort || role.effort };
     assert(JSON.stringify(delegation?.id ?? null) === JSON.stringify(job.delegation?.id ?? null),'Delegation changed after this job was queued; resubmit it under the current arrangement');
     // A worker owns its own job record after claiming it under the common coordinator lock.
     const queueDeadline = Date.now() + ws.config.runTimeoutMs;
@@ -112,7 +114,6 @@ export async function runWorker(ws,id) {
     // The permit is spent here, by the worker that uses it, so one approval
     // cannot start a second writer with the same task name.
     if (packet.authority === 'workspace-write') job.approval = await consume(ws,packet.taskId) ?? job.approval;
-    let repo = ws.project;
     if (packet.worktree) {
       repo = await contained(ws.root,path.resolve(ws.root,packet.worktree));
       const common = (await git(repo,['rev-parse','--path-format=absolute','--git-common-dir'])).trim();
@@ -206,7 +207,12 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     const configurationCurrent = job.configurationDigest === await runtimeDigest(ws) && contractCurrent;
     job.evidenceFreshness = configurationCurrent && (packet.authority === 'workspace-write' || job.before.digest === job.after.digest) ? 'CURRENT' : 'STALE';
     job.providerError = providerError;
-    if (stopped) { await save(stopped,{exit,providerError}); return; }
+    if (stopped) {
+      const stage = job.status;
+      await save(stopped,{exit,providerError});
+      await writePostmortem(ws,job,repo,stage);
+      return;
+    }
     assert(exit.code === 0,`Worker exited unsuccessfully (${exit.code}); inspect local artifacts`);
     assert(ready,'No provider readiness event received');
     assert(result,`No structured result received${parseError ? '; inspect local event stream' : ''}`);
@@ -225,11 +231,75 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
       const current = await readJSON(file);
       if (current.status !== 'QUEUED') return;
     }
+    const stage = job.status;
     await save('FAILED',{error:error.message,acceptance:'UNKNOWN',providerError:job.providerError ?? null,providerFailure:job.providerFailure ?? null});
+    await writePostmortem(ws,job,repo,stage);
   } finally {
     // A finished job stops holding its scope, whatever it finished as.
     if (TERMINAL.has(job.status)) await release(ws,id).catch(()=>{});
   }
+}
+
+/**
+ * What a failed or timed-out job leaves for the next attempt: what the packet
+ * promised, where it stopped, who was answering, what it left behind and what
+ * to look at before trying again. Pure: the caller supplies the leftovers.
+ * A cancellation is a person's decision, not a failure, and gets no report.
+ */
+export function buildPostmortem(job,{changed=[],repo=null}={}) {
+  if (!['FAILED','TIMED_OUT'].includes(job.status)) return null;
+  const packet = job.packet ?? {};
+  const stage = job.stage ?? null;
+  const provider = job.runtime ? { provider:job.runtime.provider, model:job.runtime.resolvedModel ?? job.runtime.model, effort:job.runtime.effort, version:job.runtime.version ?? null }
+    : job.requested ? { ...job.requested, version:null } : null;
+  const started = !['QUEUED','PREFLIGHT'].includes(stage);
+  const nextChecks = [];
+  if (job.providerFailure?.suggestion) nextChecks.push(job.providerFailure.suggestion);
+  if (!started) nextChecks.push('Failed before the provider started; resolve the error above before resubmitting.');
+  else if (stage === 'STARTING') nextChecks.push('The provider never reported readiness: check the executable, authentication and connectivity with claudex doctor.');
+  else if (job.status === 'TIMED_OUT') nextChecks.push('The run exceeded runTimeoutMs: narrow the packet, or raise the limit deliberately.');
+  if (started) nextChecks.push('Read events.jsonl and stderr.log in the artifact directory before retrying.');
+  if (job.before && job.after && job.before.digest !== job.after.digest && packet.authority !== 'workspace-write') nextChecks.push('Source changed while a read-only job ran; its partial output describes no single snapshot.');
+  if (changed.length) nextChecks.push(`Uncommitted changes remain in ${repo ?? 'the repository'} (${changed.length}): ${changed.slice(0,10).join(', ')}${changed.length>10?', ...':''}. Inspect, keep or retire them before retrying; a retry starts from this state.`);
+  return {
+    schemaVersion: 1,
+    jobId: job.id ?? null,
+    taskId: job.taskId ?? packet.taskId ?? null,
+    status: job.status,
+    promised: { role:packet.role ?? null, authority:packet.authority ?? null, mode:packet.mode ?? null, goal:packet.goal ?? null, paths:packet.paths ?? [], criteria:(packet.criteria ?? []).map(c=>c.id), contractId:packet.contractId ?? null, worktree:packet.worktree ?? null },
+    failure: { stage, error:job.error ?? null, providerError:job.providerError ?? null, providerFailure:job.providerFailure ?? null, exit:job.exit ?? null },
+    provider,
+    delegation: job.delegation ?? null,
+    usage: job.usage ?? null,
+    leftovers: { repo, changed, before:job.before?.digest ?? null, after:job.after?.digest ?? null },
+    nextChecks,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+// Never lets reporting mask the failure it reports: any error here is swallowed.
+async function writePostmortem(ws,job,repo,stage) {
+  try {
+    job.stage = stage;
+    let changed = [];
+    try {
+      // In -z form a rename or copy is followed by its origin as a separate entry.
+      const entries = (await git(repo,['status','--porcelain=v1','-z','--untracked-files=all'])).split('\0');
+      for (let i = 0; i < entries.length; i++) {
+        if (!entries[i]) continue;
+        changed.push(entries[i].slice(3));
+        if (/^[RC]/.test(entries[i])) i++;
+      }
+    } catch {}
+    const report = buildPostmortem(job,{changed,repo:path.relative(ws.root,repo).split(path.sep).join('/') || '.'});
+    if (!report) return;
+    const dir = path.join(ws.state,'artifacts',job.id);
+    await fs.mkdir(dir,{recursive:true});
+    const file = path.join(dir,'postmortem.json');
+    await fs.writeFile(file,JSON.stringify(report,null,2),{mode:0o600});
+    job.postmortem = path.relative(ws.root,file).split(path.sep).join('/');
+    await atomicJSON(jobFile(ws,job.id),job);
+  } catch {}
 }
 
 const FAILURE_SIGNATURES = [

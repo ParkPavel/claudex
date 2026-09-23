@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `task init|check|verify|record|converge` bind a feature or fix to a local contract and
+  report PASS, FAIL or UNKNOWN per criterion against current, snapshot-bound evidence.
+  `workflow.requireContract` makes writing jobs name their contract.
+- A job that ends FAILED or TIMED_OUT leaves `postmortem.json` next to its artifacts: what
+  the packet promised, the stage it stopped at, the provider and model, uncommitted changes
+  left in its repository and what to check before retrying. `status --summary` points at it.
+  A cancellation is a person's decision and gets no postmortem.
+
 ## 0.2.0 — 2026-09-13
 
 ### Distributable setup

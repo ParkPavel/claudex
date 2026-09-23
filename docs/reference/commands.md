@@ -21,6 +21,7 @@ than inferred from the currently focused application.
 | `approve TASK --reason …` | Issue a one-shot approval for one writing task |
 | `run PACKET [--wait]` | Submit a task; background by default, exact job ID returned |
 | `status [JOB]` | Read all job records or one exact job |
+| `status --summary` | Compact states; a failed or timed-out job names its `postmortem.json` |
 | `cancel JOB` | Request cancellation; terminal state follows confirmed closure |
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
 | `check-project` | Execute the selected profile's commands in the managed project |
