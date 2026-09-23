@@ -87,3 +87,28 @@ test('a missing graph is reported, not invented',async t=>{
   assert.equal((await graphStatus(ws)).status,'MISSING');
   assert.equal((await projectGraph(ws,project,['src'])).status,'MISSING');
 });
+
+test('a path relative to the document\'s own folder resolves too',async t=>{
+  const {project,graph}=await fixture(t);
+  await fs.mkdir(path.join(project,'src','lib'),{recursive:true});
+  await fs.writeFile(path.join(project,'src','README.md'),'The shared helper is lib/util.ts.\n');
+  graph.nodes.push({id:'src_lib_util',label:'util.ts',source_file:'src/lib/util.ts',file_type:'code'});
+  graph.nodes.push({id:'src_readme',label:'README',source_file:'src/README.md',file_type:'document'});
+  const {graph:g,stats}=await linkDocs(project,graph);
+  assert.ok(g.links.some(e=>e.source==='src_readme'&&e.target==='src_lib_util'&&e.confidence==='EXTRACTED'));
+  assert.equal(stats.unverified.some(u=>u.path==='lib/util.ts'),false);
+});
+
+test('a shortened path resolves by unique suffix, as INFERRED, and an ambiguous one does not',async t=>{
+  const {project,graph}=await fixture(t);
+  await fs.writeFile(path.join(project,'docs','notes.md'),'See engine/aggregate.ts and settings/index.ts.\n');
+  graph.nodes.push({id:'src_lib_engine_aggregate',label:'aggregate.ts',source_file:'src/lib/engine/aggregate.ts',file_type:'code'});
+  graph.nodes.push({id:'a_settings',label:'index.ts',source_file:'src/a/settings/index.ts',file_type:'code'});
+  graph.nodes.push({id:'b_settings',label:'index.ts',source_file:'src/b/settings/index.ts',file_type:'code'});
+  graph.nodes.push({id:'docs_notes',label:'Notes',source_file:'docs/notes.md',file_type:'document'});
+  const {graph:g,stats}=await linkDocs(project,graph);
+  const e=g.links.find(x=>x.source==='docs_notes'&&x.target==='src_lib_engine_aggregate');
+  assert.equal(e?.confidence,'INFERRED');
+  assert.equal(e?.context,'path-suffix');
+  assert.ok(stats.unverified.some(u=>u.path==='settings/index.ts'),'two candidates stay unverified');
+});

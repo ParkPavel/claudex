@@ -43,11 +43,14 @@ stays in `.local/claudex/graph/`: Graphify's `graph.json`, the linked `graph.lin
 
 After Graphify, Claudex adds deterministic document → code edges:
 
-- `EXTRACTED` — a document line names a repository path that exists as a file node;
-- `INFERRED` — a document names a unique camel/Pascal/snake symbol in backticks;
+- `EXTRACTED` — a document line names a path that exists as a file node, relative to the
+  repository root or to the document's own folder;
+- `INFERRED` — a document names a unique camel/Pascal/snake symbol in backticks, or a
+  shortened path (`engine/aggregate.ts`) that exactly one file ends with;
 - `UNVERIFIED` — a named path with no file node; listed in `graph-state.json`, never an edge.
 
-`status` is `CURRENT` only when the repository snapshot equals the one the graph was built
+`graph relink` reruns only this linker on the existing Graphify output, without a new
+extraction. `status` is `CURRENT` only when the repository snapshot equals the one the graph was built
 from; otherwise `STALE` or `MISSING`, and the exit code is nonzero.
 
 ## Navigation

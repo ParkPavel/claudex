@@ -121,12 +121,23 @@ export async function linkDocs(repo, graph) {
       const at = `L${i + 1}`;
       for (const m of line.matchAll(pathRe)) {
         const rel = m[1].replace(/^\.\//, '');
-        const target = fileNode.get(rel);
+        // Repository-relative first, then relative to the document's own folder
+        // (a module README names its neighbours as `frontmatter/datasource.ts`).
+        let target = fileNode.get(rel) ?? fileNode.get(path.posix.join(path.posix.dirname(file.replaceAll('\\', '/')), rel));
+        let inferred = false;
+        if (!target) {
+          // A shortened path (`engine/aggregate.ts` for src/lib/engine/aggregate.ts)
+          // names one file only if exactly one file ends with it; that is inferred.
+          const candidates = [...fileNode.keys()].filter(f => f.endsWith(`/${rel}`));
+          if (candidates.length === 1) { target = fileNode.get(candidates[0]); inferred = true; }
+        }
         if (!target) { stats.unverified.push({ doc: file, line: i + 1, path: rel }); continue; }
         if (seen.has(`${dn.id}>${target.id}`)) continue;
         seen.add(`${dn.id}>${target.id}`);
-        g.links.push({ source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, source_file: file, source_location: at, _origin: 'claudex-link-docs' });
-        stats.extracted++;
+        g.links.push(inferred
+          ? { source: dn.id, target: target.id, relation: 'documents', confidence: 'INFERRED', confidence_score: 0.8, context: 'path-suffix', source_file: file, source_location: at, _origin: 'claudex-link-docs' }
+          : { source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, source_file: file, source_location: at, _origin: 'claudex-link-docs' });
+        if (inferred) stats.inferred++; else stats.extracted++;
       }
       for (const m of line.matchAll(symRe)) {
         const hits = byLabel.get(m[1]);
@@ -185,4 +196,15 @@ export async function graphCommand(ws, args) {
   assert(['query', 'path', 'explain', 'affected', 'god-nodes'].includes(args[0]), 'Supported: query, path, explain, affected, god-nodes');
   const env = { ...process.env, PYTHONPATH: path.join(ROOT, 'vendor'), PYTHONIOENCODING: 'utf-8', PYTHONHASHSEED: '0' };
   return run(cfg.python, ['-m', 'graphify', ...args, '--graph', linkedFile(ws)], { cwd: os.tmpdir(), env });
+}
+
+/** Re-run the document linker on the existing Graphify output, without a new extraction. */
+export async function relinkGraph(ws) {
+  assert(await exists(stateFile(ws)), 'No graph to relink; run graph build');
+  const state = await readJSON(stateFile(ws));
+  const linked = await linkDocs(ws.project, await readJSON(graphFile(ws)));
+  await fs.writeFile(linkedFile(ws), JSON.stringify(linked.graph));
+  const next = { ...state, relinkedAt: new Date().toISOString(), counts: countGraph(linked.graph), docCode: linked.stats };
+  await atomicJSON(stateFile(ws), next);
+  return next;
 }
