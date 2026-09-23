@@ -17,3 +17,9 @@ the claim concerns the running product.
 Verify reported findings against source before accepting them. Record rejected findings with
 reasons. Read canonical budgets at their source rather than copying numbers into instructions.
 Evidence files remain local. A model's proposed PASS still needs independent adjudication.
+
+For a task with a spec-workflow contract, run task converge and inspect every required
+evidence kind. Missing, stale or altered artifacts cannot pass. Manual source, UI, persistence
+and review records are explicit attestations, even when their hashes are valid. Verify review
+provenance separately; naming an observer does not establish independence. Convergence does
+not authorize publication or retirement of unrelated worktrees.

@@ -78,6 +78,11 @@ export function validateConfig(config, roles) {
   ACCESS.includes(config.access) || fail(`Unknown access mode ${config.access}; expected ${ACCESS.join(', ')}`);
   Number.isInteger(config.maxWorkers) && config.maxWorkers > 0 || fail('maxWorkers must be a positive integer');
   isObject(config.assignments) || fail('assignments must be an object of role overrides');
+  if(config.workflow!==undefined) {
+    isObject(config.workflow) || fail('workflow must be an object');
+    for(const key of Object.keys(config.workflow)) ['requireContract'].includes(key) || fail(`Unknown workflow field ${key}`);
+    typeof config.workflow.requireContract==='boolean' || fail('workflow.requireContract must be boolean');
+  }
   for (const [name, assignment] of Object.entries(config.assignments)) {
     roles?.[name] || fail(`Assignment for unknown role ${name}`);
     isObject(assignment) || fail(`Malformed assignment for ${name}`);

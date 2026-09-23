@@ -54,6 +54,12 @@ claims [--release <id>]                Show or release declared work scopes
 approve <task-id> --reason <text>      Issue a one-shot approval for one writing task
 run <packet.json> [--wait]             Submit a versioned provider job
 status [job-id] | cancel <job-id>      Inspect/cancel the exact job
+status --summary                     Compact job states without packets/transcripts
+task init <id> --goal <text> [--kind feature|bug|maintenance] [--worktree <path>]
+task check <id>                       Validate the local contract before implementation
+task verify <id> --check <check-id>   Run a declared check and bind evidence to source
+task record <id> --params <json>      Record an explicit, snapshot-bound observation
+task converge <id>                    Report PASS, FAIL or UNKNOWN for every criterion
 obsidian <operation> [--params <json>] [--write]
 modes [--status|--debt|--json]         Open the mode window; see who answers for whom
 modes --delegate codex:claude --reason <text> [--roles a,b] [--model <id>]
@@ -154,7 +160,37 @@ State, evidence and credentials never belong in the public repository.`);
         while(true) { const job=await readJSON(jobFile(ws,result.jobId));if(TERMINAL.has(job.status)){print(job);if(job.status!=='COMPLETED')process.exitCode=1;break;}await new Promise(r=>setTimeout(r,500)); }
       }
     } else if(command==='worker')await runWorker(ws,options._[1]);
-    else if(command==='status')print(await inspectJobs(ws,options._[1]));
+    else if(command==='status') {
+      const result=await inspectJobs(ws,options._[1]);
+      print(options.summary===true ? (Array.isArray(result)?result:[result]).map(job=>({
+        id:job.id,taskId:job.taskId,status:job.status,acceptance:job.acceptance,
+        evidenceFreshness:job.evidenceFreshness,updated:job.updated??job.created,
+        provider:job.runtime?.provider??null,model:job.runtime?.model??null,
+        usage:job.usage??null,
+        error:job.error??null,
+      })) : result);
+    }
+    else if(command==='task') {
+      const tasks=await import('../src/tasks.mjs');
+      const operation=options._[1],id=options._[2];
+      let result;
+      if(operation==='init')result=await tasks.initTask(ws,{taskId:id,goal:text(options.goal),kind:text(options.kind,'feature'),worktree:text(options.worktree)});
+      else if(operation==='check') {
+        result=await tasks.checkTask(ws,id);
+        if(!result.ready)process.exitCode=1;
+      } else if(operation==='verify') {
+        assert(text(options.check),'task verify requires --check <check-id>');
+        result=await tasks.verifyTask(ws,id,text(options.check));
+        if(result.status!=='PASS'||result.freshness==='STALE')process.exitCode=1;
+      } else if(operation==='record') {
+        assert(text(options.params),'task record requires --params <json>');
+        result=await tasks.recordTask(ws,id,JSON.parse(text(options.params)));
+      } else if(operation==='converge') {
+        result=await tasks.convergeTask(ws,id);
+        if(result.status!=='PASS')process.exitCode=1;
+      } else throw new Error('Use task init|check|verify|record|converge <id>');
+      print(result);
+    }
     else if(command==='cancel')print(await cancel(ws,options._[1]));
     else if(command==='obsidian')print(await obsidian(ws,options._[1],options.params?JSON.parse(options.params):{},{write:options.write===true}));
     else if(command==='modes') {

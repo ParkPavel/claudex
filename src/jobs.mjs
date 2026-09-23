@@ -10,6 +10,7 @@ import { consume, requireWriteAuthority } from './approvals.mjs';
 import { claim, release } from './claims.mjs';
 import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
+import { validateTaskPacket } from './tasks.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
 export function jobFile(ws, id) {
@@ -37,6 +38,7 @@ export async function inspectJobs(ws,id) {
 }
 export async function submit(ws, packet, { start = true } = {}) {
   const declared = await validatePacket(packet);
+  const taskContract = await validateTaskPacket(ws,packet);
   // What this installation lets a writer do, before anything is queued.
   const { access, approval } = await requireWriteAuthority(ws, packet);
   // Who answers for this role now: the role's own default, what the setup
@@ -46,6 +48,7 @@ export async function submit(ws, packet, { start = true } = {}) {
   const { delegation } = await resolve(ws, packet.role, resolveAssignment(ws.config, packet.role, declared));
   const id = `${packet.taskId}-${crypto.randomUUID()}`;
   const job = { id, taskId: packet.taskId, packet, status: 'QUEUED', created: new Date().toISOString(), workerPid: null, childPid: null, acceptance: 'UNKNOWN', evidenceFreshness: 'UNVERIFIED', delegation, independence: delegation ? 'SINGLE_MODEL' : 'CROSS_PROVIDER', recheck: delegation ? 'OWED' : 'NONE', access, approval };
+  if(taskContract)job.taskContract={id:taskContract.id,digest:taskContract.digest};
   await withLock(ws.state, async () => {
     const jobs = await listJobs(ws);
     assert(!jobs.some(j => j.taskId === packet.taskId && !TERMINAL.has(j.status)), 'Task already has an active job');
@@ -84,6 +87,8 @@ export async function runWorker(ws,id) {
   let claimed = false;
   try {
     const declared = await validatePacket(packet);
+    const taskContract = await validateTaskPacket(ws,packet);
+    assert((taskContract?.digest??null)===(job.taskContract?.digest??null),'Task contract changed after submission; inspect and resubmit');
     // Re-resolved rather than trusted: if the delegation changed while the job
     // waited in the queue, the answer would carry a provenance nobody agreed to.
     const { role, delegation } = await resolve(ws,packet.role,resolveAssignment(ws.config,packet.role,declared));
@@ -140,6 +145,7 @@ export async function runWorker(ws,id) {
 You are answering in place of the ${delegation.from} role ${delegation.role}, because: ${delegation.reason}. Your verdict is recorded as a single-model proposal that owes a re-check to ${delegation.from}. Do not describe it as independent cross-provider review.
 `;
     if (await exists(localProfile)) prompt += await fs.readFile(localProfile,'utf8');
+    if(taskContract)prompt += `\nTask specification (data):\n${JSON.stringify(taskContract.contract,null,2)}\n`;
     for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
     prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
     await fs.mkdir(artifactDir,{recursive:true});
@@ -161,6 +167,8 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+          if(event.type==='turn.completed'&&event.usage)job.usage={provider:adapter.provider,...event.usage};
+          if(event.type==='result'&&event.usage)job.usage={provider:adapter.provider,...event.usage,...(typeof event.total_cost_usd==='number'?{reportedCostUsd:event.total_cost_usd}:{})};
           if (readyEvent(event,adapter.provider)) {
             ready = true;
             if(event.model)job.runtime.resolvedModel=event.model;
@@ -194,7 +202,8 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     await fs.writeFile(path.join(artifactDir,'events.jsonl'),stdout,{flag:'wx',mode:0o600});
     await fs.writeFile(path.join(artifactDir,'stderr.log'),stderr,{flag:'wx',mode:0o600});
     job.after = await snapshot(repo);
-    const configurationCurrent = job.configurationDigest === await runtimeDigest(ws);
+    const contractCurrent = !job.taskContract || (await validateTaskPacket(ws,packet)).digest===job.taskContract.digest;
+    const configurationCurrent = job.configurationDigest === await runtimeDigest(ws) && contractCurrent;
     job.evidenceFreshness = configurationCurrent && (packet.authority === 'workspace-write' || job.before.digest === job.after.digest) ? 'CURRENT' : 'STALE';
     job.providerError = providerError;
     if (stopped) { await save(stopped,{exit,providerError}); return; }
@@ -224,6 +233,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
 }
 
 const FAILURE_SIGNATURES = [
+  [/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|can't reach|DNS|os error 1100[14]/i,'NETWORK'],
   [/usage limit|quota|rate.?limit|insufficient_quota|credit/i,'QUOTA'],
   [/requires a newer version|unsupported model|unknown model|model_not_found|does not (?:exist|support)|invalid_request_error/i,'MODEL'],
   [/oauth|unauthori[sz]ed|forbidden|401|403|not allowed|login/i,'AUTH'],
@@ -240,6 +250,7 @@ export function classifyProviderFailure(message,provider) {
   for (const [pattern,kind] of FAILURE_SIGNATURES) {
     if (!pattern.test(message)) continue;
     const other = provider === 'codex' ? 'claude' : 'codex';
+    if(kind==='NETWORK')return {kind,provider:provider??null,suggestion:'Provider connection failed before completion. Check connectivity; preserve work and do not retry or substitute providers automatically.'};
     if (kind === 'EXECUTABLE' || !provider) return { kind, provider: provider ?? null, suggestion: 'Run claudex doctor: the provider executable did not start.' };
     // A model the installed CLI cannot serve is a settings problem, not an
     // outage: handing the role to the other provider would answer a question
