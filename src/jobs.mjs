@@ -11,6 +11,7 @@ import { claim, release } from './claims.mjs';
 import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
 import { validateTaskPacket } from './tasks.mjs';
+import { projectGraph } from './graph.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
 export function jobFile(ws, id) {
@@ -147,6 +148,15 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
 `;
     if (await exists(localProfile)) prompt += await fs.readFile(localProfile,'utf8');
     if(taskContract)prompt += `\nTask specification (data):\n${JSON.stringify(taskContract.contract,null,2)}\n`;
+    // The slice of the code graph for this job's paths, only when the graph was
+    // built from exactly this snapshot. Navigation aid; never evidence, never fatal.
+    if (ws.config.graph && ws.config.graph.project !== false) {
+      try {
+        const projection = await projectGraph(ws, repo, packet.paths);
+        job.graph = { status: projection.status, edges: projection.edges ?? 0 };
+        prompt += `\n${projection.text}\n`;
+      } catch (error) { job.graph = { status: 'ERROR', error: error.message }; }
+    }
     for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
     prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
     await fs.mkdir(artifactDir,{recursive:true});

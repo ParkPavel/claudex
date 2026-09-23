@@ -3,9 +3,9 @@
 This workflow adapts the intent/plan/tasks/convergence sequence from
 [Spec Kit](https://github.com/github/spec-kit), regression-first work and separated review
 from [Superpowers](https://github.com/obra/superpowers), and source provenance and navigation
-from [Graphify](https://github.com/Graphify-Labs/graphify). It adds no dependency on those tools.
-Claudex remains the job, authority and worktree owner. Graphify is optional and not installed
-or hooked into source reads by this change.
+from [Graphify](https://github.com/Graphify-Labs/graphify) (see docs/explanation/lineage.md).
+Claudex remains the job, authority and worktree owner. Graphify is vendored for the optional
+code graph (docs/how-to/graph.md); its own agent hooks are not installed.
 
 ## Contract
 
@@ -124,7 +124,7 @@ dispatching every available role. Poll `status --summary` to avoid reloading pac
 transcripts. Jobs retain provider-reported usage when supplied; no cross-provider token quota
 or account billing calculation is implied. A five-hour window is not a numerical token limit.
 
-An optional Graphify pilot should index a pinned code snapshot locally, excluding vaults,
-credentials, sessions, build outputs and private evidence. Confirm EXTRACTED/INFERRED links
-in source. Its graph is a navigation aid; no edge and no search hit are not behavior proofs.
-Measure its usefulness on an actual mapping task before adding dependencies or hooks.
+The code graph (`graph build`, docs/how-to/graph.md) indexes the project locally, excluding
+vaults, credentials, sessions, build outputs and private evidence, and is projected into a
+job only when it was built from that job's snapshot. Confirm EXTRACTED/INFERRED links in
+source. It is a navigation aid; a missing edge or search hit is not proof of absent behavior.

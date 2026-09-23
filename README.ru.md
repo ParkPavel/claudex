@@ -130,14 +130,15 @@ node claudex/bin/claudex.mjs approve implement-one-change --reason "План и 
 
 ## Документация
 
-- **Разобраться:** [архитектура и модель состояния](docs/explanation/architecture.md).
+- **Разобраться:** [архитектура и модель состояния](docs/explanation/architecture.md), [происхождение, атрибуция и благодарности](docs/explanation/lineage.md).
 - **Установить:** [установка и настройка под себя](docs/how-to/setup.md).
-- **Работать:** [Obsidian CLI](docs/how-to/obsidian.md), [передача между провайдерами](docs/how-to/delegation.md), [миграция](docs/how-to/migration.md), [публикация](docs/how-to/publication.md).
+- **Работать:** [Obsidian CLI](docs/how-to/obsidian.md), [передача между провайдерами](docs/how-to/delegation.md), [миграция](docs/how-to/migration.md), [публикация](docs/how-to/publication.md), [контракт задачи](docs/how-to/spec-workflow.md), [граф кода](docs/how-to/graph.md).
 - **Справочник:** [команды и контракты](docs/reference/commands.md).
 - **Оценить:** [источники](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md), [проверка](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
 - **Участвовать:** [руководство для контрибьюторов](https://github.com/ParkPavel/claudex/blob/main/CONTRIBUTING.md), [заметки о выпусках](CHANGELOG.md).
 
 ## Лицензия
 
-Apache-2.0. См. [LICENSE](LICENSE) и [NOTICE](NOTICE). Внешние методы указаны как влияние на
-устройство; этот репозиторий не втягивает целиком чужие библиотеки навыков.
+Apache-2.0. См. [LICENSE](LICENSE) и [NOTICE](NOTICE). Клаудекс построен на идеях Spec Kit,
+Superpowers и Graphify ([происхождение](docs/explanation/lineage.md)); он включает исправленную
+копию Graphify под её собственными лицензиями Apache-2.0/MIT и не втягивает чужие библиотеки навыков.

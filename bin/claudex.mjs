@@ -9,6 +9,7 @@ import { scan, preCommit, prePush } from '../src/security.mjs';
 import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
 import { withIsolatedCopy } from '../src/isolate.mjs';
+import { buildGraph, graphCommand, graphStatus } from '../src/graph.mjs';
 import { delegate, interactive, markUnavailable, panel, parseDelegationSpec, restore, settle, status as modeStatus } from '../src/modes.mjs';
 import { approve, pending } from '../src/approvals.mjs';
 import { claim, readClaims, release, releaseFor } from '../src/claims.mjs';
@@ -67,6 +68,8 @@ modes --delegate codex:claude --reason <text> [--roles a,b] [--model <id>]
 modes --unavailable <provider> --reason <text> | --restore <provider> [--note <text>]
 modes --settle <delegation-id> --evidence <ref[,ref]>
 check-project                          Run the selected profile checks
+graph build [--code-only] | graph status  Build the project's code graph (vendored Graphify) or check it is current
+graph query|path|explain|affected|god-nodes <args>  Navigate the linked graph
 scan --repo <path> [--history]         Inspect staged content or all history
 guard commit|push                      Git hook entrypoints
 
@@ -209,6 +212,12 @@ State, evidence and credentials never belong in the public repository.`);
         const session=await terminalIO(io=>interactive(ws,io,listJobs));
         print({acts:session.acts.length,state:await report()});
       } else console.log(panel(await report()));
+    }
+    else if(command==='graph') {
+      const sub=options._[1];
+      if(sub==='build')print(await buildGraph(ws,{codeOnly:options['code-only']===true}));
+      else if(sub==='status'||!sub){const st=await graphStatus(ws);print(st);if(st.status!=='CURRENT')process.exitCode=1;}
+      else process.stdout.write(await graphCommand(ws,options._.slice(1)));
     }
     else if(command==='check-project') {
       const profile=await readJSON(path.join(ROOT,'profiles',`${ws.config.profile}.json`));

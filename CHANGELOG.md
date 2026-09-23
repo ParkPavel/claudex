@@ -14,6 +14,13 @@
   `eol: "ignore"`). The obsidian profile's build check in `check-project` is isolated too, so
   neither rewrites the checkout's bundle.
 - The result schema states that findings are defects only; confirmations go to evidence.
+- Graphify 0.9.66 is vendored in vendor/graphify with one change proposed upstream: a
+  document's reference to code outside its extraction chunk is kept for the graph builder to
+  resolve instead of being dropped with the misattributed node. `graph build|status|query|path|
+  explain` build the project graph outside the repository, add EXTRACTED/INFERRED document →
+  code links and list UNVERIFIED paths; a CURRENT graph's slice for a job's paths is projected
+  into its prompt. See docs/how-to/graph.md and docs/explanation/lineage.md (attribution and
+  thanks to Spec Kit, Superpowers and Graphify).
 
 ## 0.2.0 — 2026-09-13
 

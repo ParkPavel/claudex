@@ -130,14 +130,15 @@ acceptance. Read [the threat model](SECURITY.md) and the online
 
 ## Documentation
 
-- **Learn:** [architecture and state model](docs/explanation/architecture.md).
+- **Learn:** [architecture and state model](docs/explanation/architecture.md), [lineage, attribution and thanks](docs/explanation/lineage.md).
 - **Install:** [install and adapt](docs/how-to/setup.md).
-- **Operate:** [Obsidian CLI](docs/how-to/obsidian.md), [provider handover](docs/how-to/delegation.md), [migration](docs/how-to/migration.md), [publication](docs/how-to/publication.md).
+- **Operate:** [Obsidian CLI](docs/how-to/obsidian.md), [provider handover](docs/how-to/delegation.md), [migration](docs/how-to/migration.md), [publication](docs/how-to/publication.md), [specification workflow](docs/how-to/spec-workflow.md), [code graph](docs/how-to/graph.md).
 - **Reference:** [commands and contracts](docs/reference/commands.md).
 - **Evaluate:** [research sources](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md), [validation](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
 - **Contribute:** [contribution guide](https://github.com/ParkPavel/claudex/blob/main/CONTRIBUTING.md), [release notes](CHANGELOG.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). External methods are cited as design
-influences; this repository does not vendor complete third-party skill libraries.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Claudex builds on Spec Kit, Superpowers
+and Graphify ([lineage](docs/explanation/lineage.md)); it vendors a patched Graphify under its
+own Apache-2.0/MIT licenses and no third-party skill libraries.

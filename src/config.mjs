@@ -83,6 +83,14 @@ export function validateConfig(config, roles) {
     for(const key of Object.keys(config.workflow)) ['requireContract'].includes(key) || fail(`Unknown workflow field ${key}`);
     typeof config.workflow.requireContract==='boolean' || fail('workflow.requireContract must be boolean');
   }
+  if(config.graph!==undefined) {
+    isObject(config.graph) || fail('graph must be an object');
+    for(const key of Object.keys(config.graph)) ['python','backend','model','excludes','project'].includes(key) || fail(`Unknown graph field ${key}`);
+    typeof config.graph.python==='string' && config.graph.python.trim() || fail('graph.python must name a Python executable');
+    if(config.graph.model!==undefined) (typeof config.graph.model==='string'&&MODEL_PATTERN.test(config.graph.model)) || fail('Invalid graph.model');
+    if(config.graph.excludes!==undefined) (Array.isArray(config.graph.excludes)&&config.graph.excludes.every(e=>typeof e==='string'&&e.trim())) || fail('graph.excludes must be strings');
+    if(config.graph.project!==undefined) typeof config.graph.project==='boolean' || fail('graph.project must be boolean');
+  }
   for (const [name, assignment] of Object.entries(config.assignments)) {
     roles?.[name] || fail(`Assignment for unknown role ${name}`);
     isObject(assignment) || fail(`Malformed assignment for ${name}`);
