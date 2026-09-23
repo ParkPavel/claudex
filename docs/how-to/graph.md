@@ -43,7 +43,8 @@ stays in `.local/claudex/graph/`: Graphify's `graph.json`, the linked `graph.lin
 
 After Graphify, Claudex adds deterministic document → code edges:
 
-- `EXTRACTED` — a document line names a path with at least one folder (`src/view.ts`,
+- `EXTRACTED` — a document links `https://github.com/<owner>/<repo>/blob/<ref>/<path>` and that
+  path is a file node (the cross-platform form for code links); or a document line names a path with at least one folder (`src/view.ts`,
   `frontmatter/datasource.ts`) that exists as a file node, relative to the repository root or
   to the document's own folder. A bare file name (`main.ts`) is too ambiguous to link;
 - `INFERRED` — a document names a unique camel/Pascal/snake symbol in backticks, or a

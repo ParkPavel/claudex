@@ -112,3 +112,17 @@ test('a shortened path resolves by unique suffix, as INFERRED, and an ambiguous 
   assert.equal(e?.context,'path-suffix');
   assert.ok(stats.unverified.some(u=>u.path==='settings/index.ts'),'two candidates stay unverified');
 });
+
+test('a canonical GitHub blob URL links the document to the file it names',async t=>{
+  const {project,graph}=await fixture(t);
+  await fs.writeFile(path.join(project,'docs','urls.md'),[
+    'See [src/view.ts](https://github.com/Owner/repo/blob/main/src/view.ts#L3) and',
+    '[folder](https://github.com/Owner/repo/tree/main/src) and',
+    '[gone](https://github.com/Owner/repo/blob/main/src/gone.ts).',
+  ].join('\n'));
+  graph.nodes.push({id:'docs_urls',label:'URLs',source_file:'docs/urls.md',file_type:'document'});
+  const {graph:g,stats}=await linkDocs(project,graph);
+  const e=g.links.filter(x=>x.source==='docs_urls');
+  assert.deepEqual(e.map(x=>[x.target,x.confidence,x.context]),[['src_view','EXTRACTED','github-url']]);
+  assert.ok(stats.unverified.some(u=>u.path==='src/gone.ts'),'a blob URL naming no file is unverified');
+});

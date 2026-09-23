@@ -134,6 +134,19 @@ export async function linkDocs(repo, graph) {
     try { text = await fs.readFile(path.join(repo, file), 'utf8'); } catch { continue; }
     text.split(/\r?\n/).forEach((line, i) => {
       const at = `L${i + 1}`;
+      // Cross-platform docs link code through https://github.com/<o>/<r>/blob/<ref>/<path>
+      // (Obsidian would hand a local .ts to the OS). The path in the URL is the
+      // repository path, so it links as EXTRACTED. tree/ URLs name folders.
+      for (const m of line.matchAll(/https:\/\/github\.com\/[^/\s)]+\/[^/\s)]+\/blob\/[^/\s)]+\/([^\s)#?]+)/g)) {
+        const rel = decodeURIComponent(m[1]);
+        const target = fileNode.get(rel);
+        if (!target) { if (CODE.test(rel)) stats.unverified.push({ doc: file, line: i + 1, path: rel }); continue; }
+        if (seen.has(`${dn.id}>${target.id}`)) continue;
+        seen.add(`${dn.id}>${target.id}`);
+        g.links.push({ source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, context: 'github-url', source_file: file, source_location: at, _origin: 'claudex-link-docs' });
+        stats.extracted++;
+      }
+      line = line.replace(/https:\/\/\S+/g, '');
       for (const m of line.matchAll(pathRe)) {
         const rel = m[1].replace(/^\.\//, '');
         // Repository-relative first, then relative to the document's own folder
