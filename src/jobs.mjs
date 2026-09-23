@@ -246,6 +246,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
  * to look at before trying again. Pure: the caller supplies the leftovers.
  * A cancellation is a person's decision, not a failure, and gets no report.
  */
+const LEFTOVER_LIMIT = 200;
 export function buildPostmortem(job,{changed=[],repo=null}={}) {
   if (!['FAILED','TIMED_OUT'].includes(job.status)) return null;
   const packet = job.packet ?? {};
@@ -271,7 +272,8 @@ export function buildPostmortem(job,{changed=[],repo=null}={}) {
     provider,
     delegation: job.delegation ?? null,
     usage: job.usage ?? null,
-    leftovers: { repo, changed, before:job.before?.digest ?? null, after:job.after?.digest ?? null },
+    // An untracked dependency tree must not turn a report into megabytes.
+    leftovers: { repo, count:changed.length, changed:changed.slice(0,LEFTOVER_LIMIT), truncated:changed.length > LEFTOVER_LIMIT, before:job.before?.digest ?? null, after:job.after?.digest ?? null },
     nextChecks,
     createdAt: new Date().toISOString(),
   };
@@ -288,17 +290,20 @@ async function writePostmortem(ws,job,repo,stage) {
       for (let i = 0; i < entries.length; i++) {
         if (!entries[i]) continue;
         changed.push(entries[i].slice(3));
-        if (/^[RC]/.test(entries[i])) i++;
+        // Either column may carry it: "R " is staged, " R" is a work-tree rename.
+        if (/[RC]/.test(entries[i].slice(0,2))) i++;
       }
     } catch {}
     const report = buildPostmortem(job,{changed,repo:path.relative(ws.root,repo).split(path.sep).join('/') || '.'});
     if (!report) return;
+    // Validates the ID before it names a directory, not after.
+    const record = jobFile(ws,job.id);
     const dir = path.join(ws.state,'artifacts',job.id);
     await fs.mkdir(dir,{recursive:true});
     const file = path.join(dir,'postmortem.json');
     await fs.writeFile(file,JSON.stringify(report,null,2),{mode:0o600});
     job.postmortem = path.relative(ws.root,file).split(path.sep).join('/');
-    await atomicJSON(jobFile(ws,job.id),job);
+    await atomicJSON(record,job);
   } catch {}
 }
 

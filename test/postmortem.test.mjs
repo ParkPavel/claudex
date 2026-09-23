@@ -68,3 +68,22 @@ test('renamed files are listed once, by their new name',async t=>{
   const report=JSON.parse(await fs.readFile(path.resolve(ws.root,job.postmortem),'utf8'));
   assert.deepEqual(report.leftovers.changed.sort(),['new.txt','renamed.txt']);
 });
+
+test('a work-tree rename is listed once, by its new name',async t=>{
+  const {ws,project}=await fixture(t);
+  await fs.rename(path.join(project,'app.txt'),path.join(project,'moved.txt'));
+  git(project,'add','-N','moved.txt');
+  const {jobId}=await submit(ws,packet,{start:false});
+  await runWorker(ws,jobId);
+  const job=JSON.parse(await fs.readFile(path.join(ws.state,'jobs',`${jobId}.json`),'utf8'));
+  const report=JSON.parse(await fs.readFile(path.resolve(ws.root,job.postmortem),'utf8'));
+  assert.deepEqual(report.leftovers.changed,['moved.txt']);
+});
+
+test('the leftover list is capped but keeps the true count',()=>{
+  const changed=Array.from({length:500},(_,i)=>`f${i}.txt`);
+  const report=buildPostmortem({id:'x',taskId:'probe',status:'FAILED',stage:'RUNNING',packet},{changed});
+  assert.equal(report.leftovers.count,500);
+  assert.equal(report.leftovers.changed.length,200);
+  assert.ok(report.leftovers.truncated);
+});
