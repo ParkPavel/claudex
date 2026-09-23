@@ -70,7 +70,10 @@ failure is retained. A source/configuration change during execution makes its ev
 Do not use verify for deployment or another mutation that changes the snapshot being tested.
 A check that must mutate files, such as a build that rewrites a tracked bundle, sets
 `"isolate": true`: it runs in a disposable copy of every tracked and non-ignored file as it
-is on disk, with `node_modules` linked in, so the checkout and its evidence stay current. Add
+is on disk, with `node_modules` linked in, so its writes relative to the working folder stay
+out of the checkout and the evidence stays current. It is not a sandbox: a command that writes
+to an absolute path, a parent folder or `node_modules` still reaches them; a changed checkout
+shows as STALE evidence, a changed `node_modules` does not. Add
 `"reproduces": [{"output": "main.js", "against": ["main.js", "@workspace/<vault>/.obsidian/plugins/<id>/main.js"]}]`
 to compare the fresh output with the tracked file and a deployed copy; each pair reports
 MATCH, DIFFER or MISSING and anything but MATCH fails the check. `"eol": "ignore"` compares

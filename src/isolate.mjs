@@ -10,7 +10,10 @@ const DEFAULT_LINKS = ['node_modules'];
  * Run `fn(dir)` in a disposable copy of the checkout: every tracked and every
  * untracked-but-not-ignored file as it is on disk now, uncommitted edits
  * included, so a mutating check (a build that rewrites a tracked bundle) tests
- * this snapshot without changing it.
+ * this snapshot without changing it. It isolates writes relative to the working
+ * folder only; it is not a sandbox. A command writing to an absolute path, a
+ * parent folder or the linked node_modules still reaches them -- callers compare
+ * the checkout snapshot before and after, which catches the first two.
  *
  * Shared dependency directories are linked in. Cleanup unlinks every link and
  * confirms the link is gone before anything is removed recursively. Node's fs.rm

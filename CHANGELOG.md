@@ -24,7 +24,9 @@
   thanks to Spec Kit, Superpowers and Graphify).
 - `graph trace` records the bundler's metafile from the project's own esbuild script, run
   unchanged in an isolated copy, and merges it as EXTRACTED import, `bundled_into` and
-  `merged_into` edges. Default exclusions are anchored to the root.
+  `merged_into` edges. Default root-folder exclusions (releases, images, coverage) are anchored
+  as /name/**; node_modules and .git still match at any depth. Isolation redirects writes
+  relative to the working folder; it is not a sandbox (docs/how-to/graph.md).
 
 ## 0.2.0 — 2026-09-13
 

@@ -86,8 +86,12 @@ Parsers guess; the bundler knows. For an esbuild project, set in local `workspac
                       "mergedInto": { "main.css": "styles.css" } } }
 ```
 
-`graph trace` runs that script unchanged in an isolated copy of the snapshot (the checkout,
-its bundle and `node_modules` are untouched) and records esbuild's metafile: a loader hook
+`graph trace` runs that script unchanged in an isolated copy of the snapshot, so its ordinary
+output (files written relative to its working folder, such as `main.js`) lands in the copy
+and not in the checkout. The copy is not a sandbox: a script that writes to an absolute path,
+a parent folder or `node_modules` (linked, not copied) still reaches them. A changed checkout
+snapshot marks the trace unstable and it is not merged; changes inside `node_modules` are
+not detected. The trace records esbuild's metafile: a loader hook
 hands the script's `import esbuild` a shim that calls the real `build` with `metafile: true`.
 The next `build`/`relink` merges it, only when it describes the same snapshot, as EXTRACTED
 edges: imports the AST pass missed, `bundled_into` (source → generated file, with bytes) and
