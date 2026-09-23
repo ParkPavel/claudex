@@ -2825,8 +2825,13 @@ def extract_corpus_parallel(
         # Import-family relations are excluded: build would mint an external
         # stub for a missing target (#2873), i.e. a phantom node.
         def _keep_cross_file_reference(e: dict) -> bool:
+            # The claim must come from a file this chunk actually dispatched: a
+            # concept- or ghost-attributed edge is not the document speaking.
+            sf = e.get("source_file")
             return (
-                e.get("target") in dropped_ids
+                bool(sf)
+                and _resolve_against_root(sf) in _dispatched_resolved
+                and e.get("target") in dropped_ids
                 and e.get("source") not in dropped_ids
                 and e.get("relation") not in _CROSS_FILE_STUBBED_RELATIONS
             )

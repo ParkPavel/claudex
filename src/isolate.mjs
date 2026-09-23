@@ -75,6 +75,11 @@ export async function compareReproduction(ws, repo, dir, reproduces) {
       const { base, rel } = reproductionTarget(ws, repo, value);
       const file = path.resolve(base, rel);
       assert(file === base || file.startsWith(base + path.sep), 'Reproduction target escapes its root');
+      // A link inside the root can still point outside it; compare real paths too.
+      if (await exists(file)) {
+        const realBase = await fs.realpath(base), realFile = await fs.realpath(file);
+        assert(realFile === realBase || realFile.startsWith(realBase + path.sep), 'Reproduction target escapes its root through a link');
+      }
       const expected = await fileSha(file, eol);
       out.push({ output, against: value, outputSha256: built, againstSha256: expected,
         ...(eol === 'ignore' ? { normalized: true } : {}),

@@ -87,6 +87,7 @@ export function validateConfig(config, roles) {
     isObject(config.graph) || fail('graph must be an object');
     for(const key of Object.keys(config.graph)) ['python','backend','model','excludes','project'].includes(key) || fail(`Unknown graph field ${key}`);
     typeof config.graph.python==='string' && config.graph.python.trim() || fail('graph.python must name a Python executable');
+    if(config.graph.backend!==undefined) (typeof config.graph.backend==='string'&&/^[a-z][a-z0-9-]*$/.test(config.graph.backend)) || fail('graph.backend must be a Graphify backend name');
     if(config.graph.model!==undefined) (typeof config.graph.model==='string'&&MODEL_PATTERN.test(config.graph.model)) || fail('Invalid graph.model');
     if(config.graph.excludes!==undefined) (Array.isArray(config.graph.excludes)&&config.graph.excludes.every(e=>typeof e==='string'&&e.trim())) || fail('graph.excludes must be strings');
     if(config.graph.project!==undefined) typeof config.graph.project==='boolean' || fail('graph.project must be boolean');

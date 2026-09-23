@@ -10,6 +10,8 @@
   2. 3bea3fcc "Pin PYTHONHASHSEED on Windows with a child process, not an emulated exec" —
      graphify/__main__.py; site marked `PROPOSAL (Windows re-exec)`. Claudex also sets
      PYTHONHASHSEED=0 itself, which skips the re-exec entirely.
+  3. f4ace0bc "Keep a cross-file reference only when the edge's own file was dispatched" —
+     tightens change 1 after cross-provider review; adds import-family guard tests.
 
 Only the `graphify/` package is vendored; tests stay upstream. Dependencies come from a
 separately installed Graphify (`uv tool install graphifyy`); Claudex prepends `vendor/` to

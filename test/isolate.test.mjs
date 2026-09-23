@@ -117,3 +117,15 @@ test('eol:ignore compares text content across a CRLF checkout, and says so',asyn
   assert.equal(relaxed.reproduction[0].normalized,true);
   assert.equal(relaxed.status,'PASS');
 });
+
+test('a reproduction target cannot leave its root through a link',async t=>{
+  const {ws,contract,file,root}=await fixture(t);
+  const outside=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-outside-'));
+  t.after(()=>fs.rm(outside,{recursive:true,force:true}));
+  await fs.writeFile(path.join(outside,'main.js'),'built from source-v1\n');
+  await fs.symlink(outside,path.join(root,'link'),process.platform==='win32'?'junction':'dir');
+  contract.checks[0].reproduces=[{output:'bundle.js',against:['@workspace/link/main.js']}];
+  await atomicJSON(file,contract);
+  await assert.rejects(()=>verifyTask(ws,'bundle','build'),/escapes/);
+  await fs.unlink(path.join(root,'link'));
+});

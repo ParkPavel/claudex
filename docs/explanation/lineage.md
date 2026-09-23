@@ -30,10 +30,11 @@ vault observation agree. It is not a general agent framework and it does not hos
 
 ## Vendored Graphify
 
-`vendor/graphify/` is Graphify 0.9.66 (upstream commit `a5957aa`) with one change, recorded in
+`vendor/graphify/` is Graphify 0.9.66 (upstream commit `a5957aa`) with two changes, recorded in
 `vendor/graphify/UPSTREAM.md` and proposed upstream: a document's reference to code in a file
 outside its extraction chunk is kept for the graph builder to resolve, instead of being dropped
-together with the misattributed node (#1895/#1916). The upstream license, `LICENSE-MIT` and
+together with the misattributed node (#1895/#1916); and on Windows the PYTHONHASHSEED re-exec
+runs as a child process, because the emulated exec through a venv launcher crashed with no output. The upstream license, `LICENSE-MIT` and
 `NOTICE` are kept beside it. Claudex runs it with the dependencies of a separately installed
 Graphify (`uv tool install graphifyy`), builds the graph outside the product repository and
 decides which slice a job sees (`docs/how-to/graph.md`). Graphify's own agent hooks are not

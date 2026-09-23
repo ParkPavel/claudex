@@ -13,8 +13,8 @@ vendor/graphify — Graphify 0.9.66 (https://github.com/Graphify-Labs/graphify)
 Copyright 2026 Safi Shamsi and the Graphify contributors.
 Licensed under the Apache License, Version 2.0; portions under the MIT License.
 The license texts and upstream NOTICE are in vendor/graphify/LICENSE,
-vendor/graphify/LICENSE-MIT and vendor/graphify/NOTICE. Claudex modifies it; the
-change is described in vendor/graphify/UPSTREAM.md.
+vendor/graphify/LICENSE-MIT and vendor/graphify/NOTICE. Claudex modifies it in two places; the
+changes are described in vendor/graphify/UPSTREAM.md.
 
 Claude, Codex, Obsidian and Graphify are names of their respective products; this project is
 independent and does not imply endorsement by their owners.
