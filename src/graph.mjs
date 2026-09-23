@@ -69,7 +69,7 @@ export async function buildGraph(ws, { codeOnly = false } = {}) {
   }
   finally { await fs.rm(neutral, { recursive: true, force: true }).catch(() => {}); }
   const graph = await readJSON(graphFile(ws));
-  const linked = await linkDocs(ws.project, graph);
+  const linked = await linkDocs(ws.project, graph, { githubRepo: await githubRepoOf(ws.project) });
   const traced = await withTrace(ws, linked.graph, before.digest);
   await fs.writeFile(linkedFile(ws), JSON.stringify(traced.graph));
   const after = await snapshot(ws.project);
@@ -94,6 +94,14 @@ function graphifyVersion(log) {
   return /graphify\s+(\d+\.\d+\.\d+)/i.exec(log ?? '')?.[1] ?? null;
 }
 
+/** owner/repo of the project's GitHub origin, or null. */
+export async function githubRepoOf(repo) {
+  try {
+    const url = (await git(repo, ['remote', 'get-url', 'origin'])).trim();
+    return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/i.exec(url)?.[1] ?? null;
+  } catch { return null; }
+}
+
 export function countGraph(g) {
   const confidence = {};
   for (const e of g.links) confidence[e.confidence ?? 'UNLABELED'] = (confidence[e.confidence ?? 'UNLABELED'] ?? 0) + 1;
@@ -107,7 +115,7 @@ export function countGraph(g) {
  *   INFERRED    a `symbol` in backticks whose camel/Pascal/snake label is unique
  *   UNVERIFIED  a named path with no file node (listed, never turned into an edge)
  */
-export async function linkDocs(repo, graph) {
+export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
   const g = { ...graph, links: [...graph.links] };
   const fileNode = new Map();
   for (const n of g.nodes) {
@@ -137,8 +145,12 @@ export async function linkDocs(repo, graph) {
       // Cross-platform docs link code through https://github.com/<o>/<r>/blob/<ref>/<path>
       // (Obsidian would hand a local .ts to the OS). The path in the URL is the
       // repository path, so it links as EXTRACTED. tree/ URLs name folders.
-      for (const m of line.matchAll(/https:\/\/github\.com\/[^/\s)]+\/[^/\s)]+\/blob\/[^/\s)]+\/([^\s)#?]+)/g)) {
-        const rel = decodeURIComponent(m[1]);
+      for (const m of line.matchAll(/https:\/\/github\.com\/([^/\s)]+\/[^/\s)]+)\/blob\/[^/\s)]+\/([^\s)#?]+)/g)) {
+        // Only this repository's URLs name local files; another repository's
+        // src/view.ts is not ours. Unknown identity links nothing.
+        if (!githubRepo || m[1].toLowerCase() !== githubRepo.toLowerCase()) continue;
+        // Sentence punctuation after a bare URL is not part of the path.
+        const rel = decodeURIComponent(m[2]).replace(/[.,;:!?'"]+$/, '');
         const target = fileNode.get(rel);
         if (!target) { if (CODE.test(rel)) stats.unverified.push({ doc: file, line: i + 1, path: rel }); continue; }
         if (seen.has(`${dn.id}>${target.id}`)) continue;
@@ -230,7 +242,7 @@ export async function graphCommand(ws, args) {
 export async function relinkGraph(ws) {
   assert(await exists(stateFile(ws)), 'No graph to relink; run graph build');
   const state = await readJSON(stateFile(ws));
-  const linked = await linkDocs(ws.project, await readJSON(graphFile(ws)));
+  const linked = await linkDocs(ws.project, await readJSON(graphFile(ws)), { githubRepo: await githubRepoOf(ws.project) });
   const traced = await withTrace(ws, linked.graph, state.snapshot?.digest);
   await fs.writeFile(linkedFile(ws), JSON.stringify(traced.graph));
   const next = { ...state, relinkedAt: new Date().toISOString(), counts: countGraph(traced.graph), docCode: linked.stats, trace: traced.trace };

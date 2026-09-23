@@ -121,8 +121,20 @@ test('a canonical GitHub blob URL links the document to the file it names',async
     '[gone](https://github.com/Owner/repo/blob/main/src/gone.ts).',
   ].join('\n'));
   graph.nodes.push({id:'docs_urls',label:'URLs',source_file:'docs/urls.md',file_type:'document'});
-  const {graph:g,stats}=await linkDocs(project,graph);
+  const {graph:g,stats}=await linkDocs(project,graph,{githubRepo:'Owner/repo'});
   const e=g.links.filter(x=>x.source==='docs_urls');
   assert.deepEqual(e.map(x=>[x.target,x.confidence,x.context]),[['src_view','EXTRACTED','github-url']]);
   assert.ok(stats.unverified.some(u=>u.path==='src/gone.ts'),'a blob URL naming no file is unverified');
+});
+
+test('a blob URL links only for this repository, and trailing punctuation is not part of the path',async t=>{
+  const {project,graph}=await fixture(t);
+  await fs.writeFile(path.join(project,'docs','urls2.md'),[
+    'Registered in https://github.com/Owner/repo/blob/main/src/view.ts.',
+    'Unrelated: https://github.com/Someone/else/blob/main/src/view.ts',
+  ].join('\n'));
+  graph.nodes.push({id:'docs_urls2',label:'URLs2',source_file:'docs/urls2.md',file_type:'document'});
+  const {graph:g}=await linkDocs(project,graph,{githubRepo:'owner/repo'});
+  const e=g.links.filter(x=>x.source==='docs_urls2'&&x.context==='github-url');
+  assert.deepEqual(e.map(x=>[x.target,x.source_location]),[['src_view','L1']]);
 });
