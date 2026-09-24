@@ -96,3 +96,10 @@ test('a timeout caused by a lost connection says so instead of blaming the packe
   assert.ok(report.nextChecks.some(c=>/connect/i.test(c)));
   assert.ok(!report.nextChecks.some(c=>/narrow the packet/.test(c)),'a network failure is not a packet-size problem');
 });
+
+test('Codex\'s own wording for a lost network is recognised',()=>{
+  for (const text of ['Reconnecting... waiting for network (Connection failed: error sending request)','stream disconnected before completion']) {
+    const report=buildPostmortem({id:'x',taskId:'probe',status:'TIMED_OUT',stage:'RUNNING',packet,runtime:{provider:'codex',model:'m',effort:'high'},providerError:text},{changed:[]});
+    assert.equal(report.failure.providerFailure?.kind,'NETWORK',text);
+  }
+});
