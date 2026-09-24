@@ -264,11 +264,15 @@ export function buildPostmortem(job,{changed=[],repo=null}={}) {
   const provider = job.runtime ? { provider:job.runtime.provider, model:job.runtime.resolvedModel ?? job.runtime.model, effort:job.runtime.effort, version:job.runtime.version ?? null }
     : job.requested ? { ...job.requested, version:null } : null;
   const started = !['QUEUED','PREFLIGHT'].includes(stage);
+  // A stopped job (TIMED_OUT) never passes through the catch that classifies
+  // provider errors; classify here too, or a lost connection that retried
+  // until the deadline reads as "the packet was too big".
+  const providerFailure = job.providerFailure ?? classifyProviderFailure(`${job.error ?? ''} ${job.providerError ?? ''}`.trim(), provider?.provider);
   const nextChecks = [];
-  if (job.providerFailure?.suggestion) nextChecks.push(job.providerFailure.suggestion);
+  if (providerFailure?.suggestion) nextChecks.push(providerFailure.suggestion);
   if (!started) nextChecks.push('Failed before the provider started; resolve the error above before resubmitting.');
   else if (stage === 'STARTING') nextChecks.push('The provider never reported readiness: check the executable, authentication and connectivity with claudex doctor.');
-  else if (job.status === 'TIMED_OUT') nextChecks.push('The run exceeded runTimeoutMs: narrow the packet, or raise the limit deliberately.');
+  else if (job.status === 'TIMED_OUT' && providerFailure?.kind !== 'NETWORK') nextChecks.push('The run exceeded runTimeoutMs: narrow the packet, or raise the limit deliberately.');
   if (started) nextChecks.push('Read events.jsonl and stderr.log in the artifact directory before retrying.');
   if (job.before && job.after && job.before.digest !== job.after.digest && packet.authority !== 'workspace-write') nextChecks.push('Source changed while a read-only job ran; its partial output describes no single snapshot.');
   if (changed.length) nextChecks.push(`Uncommitted changes remain in ${repo ?? 'the repository'} (${changed.length}): ${changed.slice(0,10).join(', ')}${changed.length>10?', ...':''}. Inspect, keep or retire them before retrying; a retry starts from this state.`);
@@ -278,7 +282,7 @@ export function buildPostmortem(job,{changed=[],repo=null}={}) {
     taskId: job.taskId ?? packet.taskId ?? null,
     status: job.status,
     promised: { role:packet.role ?? null, authority:packet.authority ?? null, mode:packet.mode ?? null, goal:packet.goal ?? null, paths:packet.paths ?? [], criteria:(packet.criteria ?? []).map(c=>c.id), contractId:packet.contractId ?? null, worktree:packet.worktree ?? null },
-    failure: { stage, error:job.error ?? null, providerError:job.providerError ?? null, providerFailure:job.providerFailure ?? null, exit:job.exit ?? null },
+    failure: { stage, error:job.error ?? null, providerError:job.providerError ?? null, providerFailure, exit:job.exit ?? null },
     provider,
     delegation: job.delegation ?? null,
     usage: job.usage ?? null,

@@ -87,3 +87,12 @@ test('the leftover list is capped but keeps the true count',()=>{
   assert.equal(report.leftovers.changed.length,200);
   assert.ok(report.leftovers.truncated);
 });
+
+test('a timeout caused by a lost connection says so instead of blaming the packet size',()=>{
+  const job={id:'x',taskId:'probe',status:'TIMED_OUT',stage:'RUNNING',packet,runtime:{provider:'codex',model:'gpt-5.6-luna',effort:'high'},
+    providerError:'Reconnecting... 4/5 (stream disconnected before completion: host unknown (os error 11001))'};
+  const report=buildPostmortem(job,{changed:[]});
+  assert.equal(report.failure.providerFailure?.kind,'NETWORK');
+  assert.ok(report.nextChecks.some(c=>/connect/i.test(c)));
+  assert.ok(!report.nextChecks.some(c=>/narrow the packet/.test(c)),'a network failure is not a packet-size problem');
+});
