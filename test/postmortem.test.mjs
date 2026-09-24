@@ -103,3 +103,9 @@ test('Codex\'s own wording for a lost network is recognised',()=>{
     assert.equal(report.failure.providerFailure?.kind,'NETWORK',text);
   }
 });
+
+test('a model error that mentions a connection is not a network failure',()=>{
+  const report=buildPostmortem({id:'x',taskId:'probe',status:'FAILED',stage:'RUNNING',packet,runtime:{provider:'codex',model:'m',effort:'high'},
+    providerError:'invalid_request_error: unknown model gpt-x; connection failed validation'},{changed:[]});
+  assert.equal(report.failure.providerFailure?.kind,'MODEL');
+});

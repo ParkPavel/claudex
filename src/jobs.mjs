@@ -324,7 +324,7 @@ async function writePostmortem(ws,job,repo,stage) {
 const FAILURE_SIGNATURES = [
   // Codex reports a lost network as "waiting for network (Connection failed:
   // error sending request)" or "stream disconnected before completion".
-  [/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|can't reach|DNS|os error 1100[14]|waiting for network|connection failed|error sending request|stream disconnected/i,'NETWORK'],
+  [/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|can't reach|DNS|os error 1100[14]|waiting for network|connection failed: error sending request|stream disconnected before completion/i,'NETWORK'],
   [/usage limit|quota|rate.?limit|insufficient_quota|credit/i,'QUOTA'],
   [/requires a newer version|unsupported model|unknown model|model_not_found|does not (?:exist|support)|invalid_request_error/i,'MODEL'],
   [/oauth|unauthori[sz]ed|forbidden|401|403|not allowed|login/i,'AUTH'],

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -144,7 +145,10 @@ export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
   try { tracked = new Set((await git(repo, ['ls-files', '-z'])).split('\0').filter(Boolean)); } catch {}
   const withheld = rel => {
     if (!tracked.has(rel) || !CODE.test(rel)) return null;
-    const node = { id: `withheld_${rel.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}`, label: path.posix.basename(rel), source_file: rel, file_type: 'code', withheld: true, _origin: 'claudex-link-docs' };
+    // Sanitising alone maps a-b.css and a_b.css to one id; a short hash of the
+    // path keeps them apart, and the prefix keeps clear of Graphify's ids.
+    const tag = crypto.createHash('sha256').update(rel).digest('hex').slice(0, 8);
+    const node = { id: `claudex_withheld_${rel.replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase()}_${tag}`, label: path.posix.basename(rel), source_file: rel, file_type: 'code', withheld: true, _origin: 'claudex-link-docs' };
     g.nodes.push(node); fileNode.set(rel, node); stats.withheld++;
     return node;
   };
@@ -188,7 +192,7 @@ export async function linkDocs(repo, graph, { githubRepo = null } = {}) {
         if (seen.has(`${dn.id}>${target.id}`)) continue;
         seen.add(`${dn.id}>${target.id}`);
         g.links.push(inferred
-          ? { source: dn.id, target: target.id, relation: 'documents', confidence: 'INFERRED', confidence_score: 0.8, context: 'path-suffix', source_file: file, source_location: at, _origin: 'claudex-link-docs' }
+          ? { source: dn.id, target: target.id, relation: 'documents', confidence: 'INFERRED', confidence_score: 0.8, context: target.withheld ? 'withheld-by-graphify' : 'path-suffix', source_file: file, source_location: at, _origin: 'claudex-link-docs' }
           : { source: dn.id, target: target.id, relation: 'documents', confidence: 'EXTRACTED', confidence_score: 1, ...(target.withheld ? { context: 'withheld-by-graphify' } : {}), source_file: file, source_location: at, _origin: 'claudex-link-docs' });
         if (inferred) stats.inferred++; else stats.extracted++;
       }

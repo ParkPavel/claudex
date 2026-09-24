@@ -152,3 +152,17 @@ test('a tracked file Graphify withheld still gets a node when a document names i
   assert.ok(g.links.some(e=>e.source==='docs_style'&&e.target===node.id&&e.confidence==='EXTRACTED'&&e.context==='withheld-by-graphify'));
   assert.deepEqual(stats.unverified.filter(u=>u.doc==='docs/style.md').map(u=>u.path),['src/ui/ghost.css'],'an untracked path stays unverified');
 });
+
+test('withheld nodes get unique ids and keep their context on suffix links',async t=>{
+  const {project,graph}=await fixture(t);
+  await fs.mkdir(path.join(project,'src','ui'),{recursive:true});
+  for (const f of ['a-b.css','a_b.css']) await fs.writeFile(path.join(project,'src','ui',f),':root{}\n');
+  git(project,'add','src/ui');
+  await fs.writeFile(path.join(project,'docs','two.md'),'See src/ui/a-b.css and src/ui/a_b.css; also ui/a-b.css.\n');
+  graph.nodes.push({id:'docs_two',label:'Two',source_file:'docs/two.md',file_type:'document'});
+  const {graph:g}=await linkDocs(project,graph);
+  const withheld=g.nodes.filter(n=>n.withheld);
+  assert.equal(new Set(withheld.map(n=>n.id)).size,2,'two files, two ids');
+  assert.equal(new Set(g.nodes.map(n=>n.id)).size,g.nodes.length,'no id is reused');
+  assert.ok(g.links.filter(e=>e.source==='docs_two').every(e=>e.context==='withheld-by-graphify'));
+});
