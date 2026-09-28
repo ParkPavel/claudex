@@ -143,6 +143,7 @@ test('a ledger keyed by session, from an earlier version, still counts',async t=
   await atomicJSON(path.join(ws.state,'reports','.reported-jobs.json'),{A:['j1']});
   await atomicJSON(jobFile(ws,'j1'),{id:'j1',taskId:'t1',status:'FAILED',updated:'2026-09-28T11:00:00Z',error:'x'});
   assert.equal(await reportReady(ws,{now,session:'A'}),null);
+  assert.match((await reportReady(ws,{now,session:'B'})).hookSpecificOutput.additionalContext,/t1 -> FAILED/,'another session still receives it');
 });
 
 test('sessions keep separate ledgers holding only fresh IDs, and abandoned ones are removed',async t=>{

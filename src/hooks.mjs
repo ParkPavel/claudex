@@ -154,7 +154,8 @@ async function readSeen(ws, session) {
   // An earlier version kept one list for the whole workspace; it still counts for every session.
   // Both earlier shapes count: a plain list, and an object of lists keyed by session.
   const legacy = await quiet(() => readJSON(seenFile(ws)));
-  const earlier = Array.isArray(legacy) ? legacy : Object.values(legacy ?? {}).filter(Array.isArray).flat();
+  const pick = key => (Array.isArray(legacy?.[key]) ? legacy[key] : []);
+  const earlier = Array.isArray(legacy) ? legacy : [...pick('*'), ...pick(session)];
   const own = await quiet(() => readJSON(sessionFile(ws,session)));
   return new Set([...earlier, ...(Array.isArray(own) ? own : [])]);
 }
