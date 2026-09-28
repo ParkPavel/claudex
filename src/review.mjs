@@ -87,7 +87,8 @@ export async function previousReview(ws, packet, jobFile, repo = null) {
   assert(result, `The previous review's result is missing; re-review instead of re-checking`);
   const owed = (result.criteria ?? []).filter(c => c.status !== 'PASS').map(c => c.id);
   // The scope cannot narrow: every path the review covered is covered again.
-  const norm = p => p.replaceAll('\\', '/').replace(/\/+$/, '');
+  // Resolved like Git resolves them: "src/../test" is test, not something under src.
+  const norm = p => path.posix.normalize(p.replaceAll('\\', '/')).replace(/\/+$/, '').replace(/^\.\//, '');
   const covers = (scope, p) => scope.some(s => norm(p) === norm(s) || norm(p).startsWith(`${norm(s)}/`));
   const narrowed = (prior.packet?.paths ?? []).filter(p => !covers(packet.paths ?? [], p));
   assert(!narrowed.length, `A re-check covers every path the previous review covered: ${narrowed.join(', ')}`);

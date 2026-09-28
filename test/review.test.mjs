@@ -140,6 +140,8 @@ test('a re-check keeps the reviewing role and the exact wording of what it owes'
   assert.equal((await reviewContext(ws,repo,{...reviewer,recheckOf:'owed'},{base},{jobFile})).meta.recheckOf,'owed');
   await assert.rejects(reviewContext(ws,repo,{...reviewer,paths:['src/sum.mjs'],recheckOf:'owed'},{base},{jobFile}),/covers every path the previous review covered: src/);
   assert.equal((await reviewContext(ws,repo,{...reviewer,paths:['src','README.md'],recheckOf:'owed'},{base},{jobFile})).meta.recheckOf,'owed','a wider scope is allowed');
+  await atomicJSON(jobFile(ws,'dotted'),{id:'dotted',status:'COMPLETED',packet:{...reviewer,paths:['src/../README.md']},before:{head:base},artifactDirectory:dir});
+  await assert.rejects(reviewContext(ws,repo,{...reviewer,recheckOf:'dotted'},{base},{jobFile}),/covered: src\/\.\.\/README\.md/,'src/../README.md is not under src');
 });
 
 test('a list longer than it may show says how many it left out and how to list them',async t=>{
