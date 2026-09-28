@@ -5,6 +5,7 @@ import { assert, atomicJSON, contained, exists, git, inside, readJSON, runtimeDi
 import { runCommand } from './process.mjs';
 import { compareReproduction, withIsolatedCopy } from './isolate.mjs';
 import { migrateConfig } from './config.mjs';
+import { readPrinciples } from './setup.mjs';
 
 const ID=/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,70}$/;
 const HASH=/^[a-f0-9]{64}$/;
@@ -121,9 +122,61 @@ async function readyTask(ws,taskId) {
   await git(loaded.repo,['merge-base','--is-ancestor',loaded.contract.base.head,'HEAD']);
   return loaded;
 }
+/**
+ * A consistency pass over a valid contract, after Spec Kit's analyze: the
+ * contract can be well-formed and still promise something no check will ever
+ * show. Warnings never block; they are what a reviewer would otherwise find
+ * after the work is done. Pure: principles come from the caller.
+ */
+const VAGUE=/\b(fast|quick(?:ly)?|robust|intuitive|user-friendly|properly|correctly|appropriate(?:ly)?|seamless(?:ly)?|clean|nice|as expected|works?)\b|(?:^|[\s,.(])(быстро|корректно|правильно|удобно|красиво|нормально|как ожидается|работает)(?=$|[\s,.)])/i;
+// Angle brackets are not placeholders here: decisions quote markup and CLI syntax.
+const PLACEHOLDER=/\b(TODO|TBD|FIXME|TKTK)\b|\?\?\?/;
+// A file scope is code by its extension; a directory scope (no dot) by its name.
+const CODE_PATH=/\.(?:[cm]?[jt]sx?|svelte|vue|swift|kt|py|rs|go)$|^(?:[^.]*\/)?(?:src|lib|app|tests?|__tests__)(?:\/[^.]*)?$/;
+// Contracts often call the tool a script wraps (node node_modules/eslint/...).
+const SCRIPT_ALIASES={test:/\btest\b|jest|vitest|mocha|--test/,build:/\bbuild\b|esbuild|vite build|webpack|rollup/,lint:/\blint\b|eslint/};
+const STATIC_CHECK=/lint|tsc|typecheck|type-check|svelte-check|swiftlint|mypy|clippy|\bcheck\b/i;
+export function analyzeContract(c,{principles=null}={}) {
+  const warnings=[];
+  const warn=(category,severity,summary)=>warnings.push({id:`${category[0].toUpperCase()}${warnings.filter(w=>w.category===category).length+1}`,category,severity,summary});
+  const commandLine=check=>[check.command,...(check.args??[])].join(' ');
+  for(const item of c.criteria) {
+    if(VAGUE.test(item.text)&&!/\d/.test(item.text))warn('ambiguity','MEDIUM',`Criterion ${item.id} uses a word no check can measure: "${item.text.match(VAGUE)[0].trim()}". State what is observed instead.`);
+  }
+  for(const [where,text] of [['goal',c.goal],...c.criteria.map(e=>[`criterion ${e.id}`,e.text]),...c.tasks.map(e=>[`task ${e.id}`,e.text??'']),...c.decisions.map((d,i)=>[`decision ${i+1}`,d])]) {
+    if(PLACEHOLDER.test(text))warn('placeholder','HIGH',`The ${where} still holds a placeholder: "${text.match(PLACEHOLDER)[0]}".`);
+  }
+  const seen=new Map();
+  for(const item of c.criteria) {
+    const key=item.text.toLowerCase().replace(/\W+/g,' ').trim();
+    if(seen.has(key))warn('duplication','MEDIUM',`Criteria ${seen.get(key)} and ${item.id} say the same thing; merge them or tell them apart.`);
+    else seen.set(key,item.id);
+  }
+  for(const item of c.criteria) {
+    if(!c.tasks.some(t=>t.criteria.includes(item.id)))warn('coverage','HIGH',`No task works towards criterion ${item.id}.`);
+    if(item.requires.includes('automated')&&!c.checks.some(k=>k.criteria.includes(item.id)))warn('coverage','HIGH',`Criterion ${item.id} requires automated evidence, but no check maps to it; converge can only answer UNKNOWN.`);
+  }
+  // A test suite can pass while strict typing fails: that once surfaced only in
+  // a later contract that happened to run svelte-check.
+  const code=c.paths.some(p=>CODE_PATH.test(norm(p)));
+  if(code&&!c.checks.some(k=>STATIC_CHECK.test(commandLine(k))))warn('checks','HIGH','The scope changes code, but no check runs the type checker or linter; a passing test run does not show the code compiles cleanly.');
+  // Only for code: a documentation contract owes no build.
+  if(code&&principles?.checks) {
+    for(const required of principles.checks.split(',').map(s=>s.trim()).filter(Boolean)) {
+      const script=required.replace(/^npm (run )?/,'');
+      const runs=SCRIPT_ALIASES[script]??{test:line=>line.includes(script)};
+      if(!c.checks.some(k=>runs.test(commandLine(k))))warn('principles','MEDIUM',`The recorded principles require "${required}" before completion; no check of this contract runs it.`);
+    }
+  }
+  return warnings;
+}
 export async function checkTask(ws,taskId) {
   id(taskId);
-  try { const t=await readyTask(ws,taskId);return {taskId,ready:true,errors:[],contractDigest:t.contractDigest}; }
+  try {
+    const t=await readyTask(ws,taskId);
+    const profile=await fs.readFile(path.join(ws.state,'project-profile.md'),'utf8').catch(()=>null);
+    return {taskId,ready:true,errors:[],warnings:analyzeContract(t.contract,{principles:readPrinciples(profile)}),contractDigest:t.contractDigest};
+  }
   catch(error) { return {taskId,ready:false,errors:[error.message]}; }
 }
 // Opt-in enforcement keeps old installations readable; this workspace enables it.

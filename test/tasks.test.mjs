@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { initTask, loadTask, checkTask, validateContract, validateTaskPacket, verifyTask, recordTask, convergeTask, checkEvidenceFor } from '../src/tasks.mjs';
+import { initTask, loadTask, checkTask, validateContract, validateTaskPacket, verifyTask, recordTask, convergeTask, checkEvidenceFor, analyzeContract } from '../src/tasks.mjs';
 import { atomicJSON, snapshot, runtimeDigest } from '../src/io.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { classifyProviderFailure, submit } from '../src/jobs.mjs';
@@ -265,4 +265,24 @@ test('a reviewer receives the latest check run, CURRENT only on its own snapshot
   assert.equal(tampered.logState,'TAMPERED');
   assert.equal(tampered.log,null);
   assert.deepEqual(await checkEvidenceFor(ws,null,'x'),[]);
+});
+
+test('analysis warns about what no check will show, and stays quiet on a sound contract',async t=>{
+  const {contract}=await fixture(t);
+  const sound={...contract,paths:['src/app.ts'],checks:[{id:'unit',criteria:['behavior'],command:'node',args:['node_modules/jest/bin/jest.js']},{id:'types',criteria:['behavior'],command:'node',args:['node_modules/svelte-check/bin/svelte-check']}]};
+  assert.deepEqual(analyzeContract(sound,{principles:{checks:'npm test, npm run svelte-check'}}),[]);
+  const weak={...sound,
+    goal:'Make the table faster TODO',
+    criteria:[{id:'behavior',text:'The table works correctly',requires:['automated']},{id:'again',text:'The table works correctly!',requires:['automated']}],
+    tasks:[{id:'change',text:'Implement',criteria:['behavior'],dependsOn:[]}],
+    checks:[{id:'unit',criteria:['behavior'],command:'node',args:['node_modules/jest/bin/jest.js']}]};
+  const warnings=analyzeContract(weak,{principles:{checks:'npm test, npm run build'}});
+  const categories=warnings.map(w=>w.category);
+  for(const expected of ['ambiguity','placeholder','duplication','coverage','checks','principles'])assert.ok(categories.includes(expected),`${expected} in ${categories}`);
+  assert.ok(warnings.some(w=>/Criterion again requires automated evidence/.test(w.summary)));
+  assert.ok(warnings.some(w=>/"npm run build"/.test(w.summary)));
+  assert.ok(!warnings.some(w=>/"npm test"/.test(w.summary)),'jest satisfies npm test');
+  const docs={...weak,paths:['README.md'],goal:'Document the table'};
+  assert.ok(!analyzeContract(docs,{principles:{checks:'npm run build'}}).some(w=>['checks','principles'].includes(w.category)),'documentation owes no build');
+  assert.ok(!analyzeContract({...sound,decisions:['Render <Badge frame={x}>']}).length,'quoted markup is not a placeholder');
 });
