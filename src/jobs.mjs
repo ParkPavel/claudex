@@ -121,6 +121,9 @@ export async function cancel(ws, id, { confirmEnded = null } = {}) {
     await atomicJSON(file,current);
     return { jobId:id, status:'CANCELLED', orphaned:true, error };
   });
+  // The job turned terminal between the first read and the lock; a request to
+  // confirm its termination is answered by the terminal path, not dropped.
+  if (closed && !closed.orphaned && confirmEnded) return cancel(ws,id,{ confirmEnded });
   if (closed) {
     // Outside the lock: release takes the same, non-reentrant lock. A failure
     // here leaves a stale claim that doctor reports and `claims --release` clears.

@@ -136,17 +136,32 @@ function summarise(job, result, postmortem) {
  * turns nobody asked for. So at Stop the person only sees a notice, nothing is
  * marked seen, and UserPromptSubmit carries the reports as context. Backlog
  * older than six hours is history, not news, and is marked seen silently.
+ *
+ * Each session keeps its own ledger, so a report reaches every session that
+ * is working, not whichever prompt came first. Known limit: a prompt that
+ * another hook blocks is never sent, and a hook cannot learn that; its
+ * reports stay readable through `wait` and `status`.
  */
-export async function reportReady(ws, { now = Date.now(), event = 'UserPromptSubmit' } = {}) {
+async function readSeen(ws, session) {
+  const stored = await quiet(() => readJSON(seenFile(ws)));
+  // An earlier version kept one list for the whole workspace; it still counts for every session.
+  const ledger = Array.isArray(stored) ? { '*':stored } : (stored ?? {});
+  return { ledger, seen:new Set([...(ledger['*'] ?? []), ...(ledger[session] ?? [])]) };
+}
+async function writeSeen(ws, session, ledger, seen) {
+  await fs.mkdir(path.dirname(seenFile(ws)),{recursive:true});
+  await atomicJSON(seenFile(ws),{ ...ledger, [session]:[...seen].filter(id => !(ledger['*'] ?? []).includes(id)) });
+}
+export async function reportReady(ws, { now = Date.now(), event = 'UserPromptSubmit', session = 'default' } = {}) {
   if (event === 'Stop') {
-    const seen = new Set(await quiet(() => readJSON(seenFile(ws))) ?? []);
+    const { seen } = await readSeen(ws,session);
     const waiting = (await listJobs(ws)).filter(job => TERMINAL.has(job.status) && !seen.has(job.id) && !(now - Date.parse(job.updated ?? job.created ?? 0) > FRESH_MS));
     return waiting.length ? { systemMessage:`Claudex: ${waiting.length} job report(s) ready; they reach Claude with your next message.`, suppressOutput:true } : null;
   }
-  return deliverReports(ws, now);
+  return deliverReports(ws, now, session);
 }
-async function deliverReports(ws, now) {
-  const seen = new Set(await quiet(() => readJSON(seenFile(ws))) ?? []);
+async function deliverReports(ws, now, session) {
+  const { ledger, seen } = await readSeen(ws,session);
   const ready = [];
   for (const job of (await listJobs(ws)).sort((a,b) => String(a.updated ?? '').localeCompare(String(b.updated ?? '')))) {
     if (!TERMINAL.has(job.status) || seen.has(job.id)) continue;
@@ -155,24 +170,31 @@ async function deliverReports(ws, now) {
     if (Number.isFinite(finished) && now - finished > FRESH_MS) { seen.add(job.id); continue; }
     ready.push(job);
   }
-  // Oldest first, as many as fit: a report is marked seen only when its whole
-  // block is in the delivered text; the rest wait for the next prompt. A single
-  // block longer than the limit is cut, says so, and still counts as delivered.
+  // Oldest first, as many as fit: a report is marked seen only when its block is
+  // in the delivered text; the rest wait for the next prompt. A summary too long
+  // for the limit is cut, but the status line and the path to the full result
+  // always survive, so a delivered report can always be read in full.
   const blocks = [];
   let used = 0;
+  const budget = MAX_CONTEXT - 200;
   for (const job of ready.slice(0,MAX_REPORTS)) {
     const dir = job.artifactDirectory ?? path.join(ws.state,'artifacts',job.id);
     const result = await quiet(() => readJSON(path.join(dir,'result.json')));
     const postmortem = await quiet(() => readJSON(path.join(dir,'postmortem.json')));
-    let block = `${job.taskId} -> ${job.status}\n${summarise(job,result,postmortem)}\n  full result: ${path.join(dir,'result.json')}`;
-    if (!blocks.length && block.length > MAX_CONTEXT - 200) block = `${block.slice(0,MAX_CONTEXT - 260)}\n  … cut; read the full result`;
-    if (used + block.length > MAX_CONTEXT - 200) break;
+    const head = `${job.taskId} -> ${job.status}`;
+    const tail = `  full result: ${path.join(dir,postmortem && !result ? 'postmortem.json' : 'result.json')}`;
+    let body = summarise(job,result,postmortem);
+    const room = budget - used - head.length - tail.length - 2;
+    if (body.length > room) {
+      if (blocks.length) break;
+      body = `${body.slice(0,Math.max(0,room - 40))}\n  … cut; read the full result`;
+    }
+    const block = `${head}\n${body}\n${tail}`;
     blocks.push(block);
     used += block.length + 1;
     seen.add(job.id);
   }
-  await fs.mkdir(path.dirname(seenFile(ws)),{recursive:true});
-  await atomicJSON(seenFile(ws),[...seen]);
+  await writeSeen(ws,session,ledger,seen);
   if (!blocks.length) return null;
   const text = `Claudex: reports ready (${blocks.length} of ${ready.length}${ready.length > blocks.length ? '; the rest follow with the next prompt' : ''}):\n${blocks.join('\n')}`;
   return { suppressOutput:true, hookSpecificOutput:{ hookEventName:'UserPromptSubmit', additionalContext:text } };
@@ -182,7 +204,7 @@ export async function runHook(ws, name, input = {}) {
   if (name === 'session-start') return sessionStart(ws);
   if (name === 'handoff') return handoff(ws,input);
   if (name === 'pre-run') return preRun(ws,input);
-  if (name === 'report-ready') return reportReady(ws,{ event:input.hook_event_name === 'Stop' ? 'Stop' : 'UserPromptSubmit' });
+  if (name === 'report-ready') return reportReady(ws,{ event:input.hook_event_name === 'Stop' ? 'Stop' : 'UserPromptSubmit', session:String(input.session_id ?? 'default') });
   throw new Error(`Unknown hook ${name}; one of ${HOOKS.join(', ')}`);
 }
 

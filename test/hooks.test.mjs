@@ -107,6 +107,35 @@ test('a report is marked seen only when its whole block was delivered',async t=>
   assert.match(rest,new RegExp(`long${shown+1} -> COMPLETED`));
 });
 
+test('each session receives a report once, whichever session prompts first',async t=>{
+  const ws=await fixture(t);
+  const now=Date.parse('2026-09-28T12:00:00Z');
+  await atomicJSON(jobFile(ws,'j1'),{id:'j1',taskId:'t1',status:'FAILED',updated:'2026-09-28T11:00:00Z',error:'x'});
+  assert.match((await reportReady(ws,{now,session:'B'})).hookSpecificOutput.additionalContext,/t1 -> FAILED/);
+  assert.match((await reportReady(ws,{now,event:'Stop',session:'A'})).systemMessage,/1 job report/);
+  assert.match((await reportReady(ws,{now,session:'A'})).hookSpecificOutput.additionalContext,/t1 -> FAILED/);
+  assert.equal(await reportReady(ws,{now,session:'A'}),null);
+  assert.equal(await reportReady(ws,{now,session:'B'}),null);
+});
+
+test('an earlier workspace-wide ledger still counts, and a cut report keeps its path',async t=>{
+  const ws=await fixture(t);
+  const now=Date.parse('2026-09-28T12:00:00Z');
+  await fs.mkdir(path.join(ws.state,'reports'),{recursive:true});
+  await atomicJSON(path.join(ws.state,'reports','.reported-jobs.json'),['old']);
+  await atomicJSON(jobFile(ws,'old'),{id:'old',taskId:'old',status:'FAILED',updated:'2026-09-28T11:00:00Z',error:'x'});
+  const dir=path.join(ws.state,'artifacts','huge');
+  await fs.mkdir(dir,{recursive:true});
+  await atomicJSON(path.join(dir,'result.json'),{criteria:Array.from({length:300},(_,i)=>({id:`criterion-${i}`,status:'UNKNOWN'})),findings:[],unknowns:[]});
+  await atomicJSON(jobFile(ws,'huge'),{id:'huge',taskId:'huge',status:'COMPLETED',updated:'2026-09-28T11:10:00Z',artifactDirectory:dir});
+  const text=(await reportReady(ws,{now,session:'S'})).hookSpecificOutput.additionalContext;
+  assert.doesNotMatch(text,/old ->/);
+  assert.match(text,/huge -> COMPLETED/);
+  assert.match(text,/cut; read the full result/);
+  assert.match(text,/full result: .*result\.json/);
+  assert.ok(text.length<=2000,String(text.length));
+});
+
 test('reports that do not fit wait for the next prompt instead of being lost',async t=>{
   const ws=await fixture(t);
   const now=Date.parse('2026-09-28T12:00:00Z');
