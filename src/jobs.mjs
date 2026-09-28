@@ -10,7 +10,7 @@ import { consume, requireWriteAuthority } from './approvals.mjs';
 import { claim, release } from './claims.mjs';
 import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
-import { validateTaskPacket } from './tasks.mjs';
+import { checkEvidenceFor, validateTaskPacket } from './tasks.mjs';
 import { projectGraph } from './graph.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
@@ -209,6 +209,11 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
 `;
     if (await exists(localProfile)) prompt += await fs.readFile(localProfile,'utf8');
     if(taskContract)prompt += `\nTask specification (data):\n${JSON.stringify(taskContract.contract,null,2)}\n`;
+    if(taskContract) {
+      const checks = await checkEvidenceFor(ws,taskContract.id,job.before.digest).catch(()=>[]);
+      job.checkEvidence = checks.map(({log,...rest})=>rest);
+      if(checks.length) prompt += `\nChecks the coordinator ran for this contract (data). CURRENT means run on exactly the snapshot you review; STALE describes an earlier state and proves nothing about this one. Use a CURRENT result as evidence instead of re-running the check; a failed run of a check in your sandbox does not override it.\n${checks.map(c=>`--- check ${c.checkId}: ${c.status}, ${c.freshness}, criteria ${c.criteria.join(', ') || 'none'}, log ${c.logState}\n${c.log ?? ''}`).join('\n')}\n`;
+    }
     // The slice of the code graph for this job's paths, only when the graph was
     // built from exactly this snapshot. Navigation aid; never evidence, never fatal.
     if (ws.config.graph && ws.config.graph.project !== false) {

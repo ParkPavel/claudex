@@ -151,6 +151,36 @@ async function evidenceRecords(ws,t) {
     return {...await readJSON(file),file};
   }));
 }
+/**
+ * The checks the coordinator already ran for this contract, handed to a job as
+ * data. A read-only reviewer cannot run the project's tests (Codex's sandbox
+ * answers jest with EPERM), and without this every such criterion came back
+ * UNKNOWN. Only the latest automated run of each check is given, with the tail
+ * of its log, and it is CURRENT only when it was taken on exactly the snapshot
+ * the job reviews; a log whose bytes no longer match its record is withheld.
+ */
+export const CHECK_LOG_TAIL=12000;
+export async function checkEvidenceFor(ws,contractId,sourceDigest) {
+  if(!contractId)return [];
+  const t=await loadTask(ws,contractId);
+  const latest=new Map();
+  for(const e of await evidenceRecords(ws,t)) {
+    if(e.kind!=='automated'||!e.checkId)continue;
+    if(!latest.has(e.checkId)||Number(e.sequence)>Number(latest.get(e.checkId).sequence))latest.set(e.checkId,e);
+  }
+  const out=[];
+  for(const e of [...latest.values()].sort((a,b)=>a.checkId.localeCompare(b.checkId))) {
+    const current=e.freshness==='CURRENT'&&e.before?.digest===sourceDigest&&e.after?.digest===sourceDigest;
+    let log=null,logState='MISSING';
+    try {
+      const bytes=await fs.readFile(await contained(ws.state,path.resolve(ws.root,e.artifact)));
+      if(sha(bytes)!==e.artifactSha256)logState='TAMPERED';
+      else { const text=bytes.toString('utf8');log=text.length>CHECK_LOG_TAIL?`…${text.slice(-CHECK_LOG_TAIL)}`:text;logState='OK'; }
+    } catch {}
+    out.push({checkId:e.checkId,evidenceId:e.id,criteria:e.criteria??[],status:e.status,freshness:current?'CURRENT':'STALE',createdAt:e.createdAt??null,logState,log});
+  }
+  return out;
+}
 async function saveEvidence(ws,t,evidence) {
   return withLock(ws.state,async()=>{
     const records=await evidenceRecords(ws,t);

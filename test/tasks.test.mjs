@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { initTask, loadTask, checkTask, validateContract, validateTaskPacket, verifyTask, recordTask, convergeTask } from '../src/tasks.mjs';
+import { initTask, loadTask, checkTask, validateContract, validateTaskPacket, verifyTask, recordTask, convergeTask, checkEvidenceFor } from '../src/tasks.mjs';
 import { atomicJSON, snapshot, runtimeDigest } from '../src/io.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { classifyProviderFailure, submit } from '../src/jobs.mjs';
@@ -248,4 +248,21 @@ test('configuration edited on disk during a check makes evidence stale',async t=
   await atomicJSON(file,contract);
   assert.equal((await verifyTask(ws,'feature','check')).freshness,'STALE');
   assert.equal((await convergeTask(ws,'feature')).status,'UNKNOWN');
+});
+
+test('a reviewer receives the latest check run, CURRENT only on its own snapshot',async t=>{
+  const {ws,project}=await fixture(t);
+  await verifyTask(ws,'feature','check');
+  const second=await verifyTask(ws,'feature','check');
+  const [check]=await checkEvidenceFor(ws,'feature',(await snapshot(project)).digest);
+  assert.equal(check.evidenceId,second.id);
+  assert.deepEqual([check.checkId,check.status,check.freshness,check.logState],['check','PASS','CURRENT','OK']);
+  assert.match(check.log,/verified/);
+  await fs.writeFile(path.join(project,'app.txt'),'changed\n');
+  assert.equal((await checkEvidenceFor(ws,'feature',(await snapshot(project)).digest))[0].freshness,'STALE');
+  await fs.appendFile(path.resolve(ws.root,second.artifact),'forged PASS\n');
+  const [tampered]=await checkEvidenceFor(ws,'feature',(await snapshot(project)).digest);
+  assert.equal(tampered.logState,'TAMPERED');
+  assert.equal(tampered.log,null);
+  assert.deepEqual(await checkEvidenceFor(ws,null,'x'),[]);
 });
