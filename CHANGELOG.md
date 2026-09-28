@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-09-29
+
+Cheaper reviews, from where a working journal showed the tokens going: tool steps, not files.
+
+- A `diff` job carries its diff (scope-limited, new files inlined, capped at 60 000 characters).
+- `recheckOf` answers an earlier review with its findings and only the changes since.
+- `budget.toolCalls` states a step budget (defaults 20 for re-checks, 40 for diff reviews).
+- Jobs record `toolCalls`; `retro` reports tool steps and input tokens per role.
+
 ## 1.0.0 — 2026-09-28
 
 Task contracts, snapshot-bound evidence and a hardened job lifecycle, with setup, hooks and

@@ -12,6 +12,7 @@ import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
 import { checkEvidenceFor, validateTaskPacket } from './tasks.mjs';
 import { projectGraph } from './graph.mjs';
+import { previousReview, reviewContext, toolSteps } from './review.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
 export const STOP_RETRY_MS = 5000;
@@ -42,6 +43,8 @@ export async function inspectJobs(ws,id) {
 export async function submit(ws, packet, { start = true } = {}) {
   const declared = await validatePacket(packet);
   const taskContract = await validateTaskPacket(ws,packet);
+  // A re-check that names a job it cannot answer is refused before it queues.
+  if (packet.recheckOf) await previousReview(ws,packet,jobFile);
   // What this installation lets a writer do, before anything is queued.
   const { access, approval } = await requireWriteAuthority(ws, packet);
   // Who answers for this role now: the role's own default, what the setup
@@ -272,6 +275,9 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
         prompt += `\n${projection.text}\n`;
       } catch (error) { job.graph = { status: 'ERROR', error: error.message }; }
     }
+    const review = await reviewContext(ws,repo,packet,job,{ jobFile });
+    if (Object.keys(review.meta).length) job.reviewContext = review.meta;
+    prompt += review.text;
     for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
     prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
     await fs.mkdir(artifactDir,{recursive:true});
@@ -293,6 +299,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+          job.toolCalls = (job.toolCalls ?? 0) + toolSteps(event,adapter.provider);
           if(event.type==='turn.completed'&&event.usage)job.usage={provider:adapter.provider,...event.usage};
           if(event.type==='result'&&event.usage)job.usage={provider:adapter.provider,...event.usage,...(typeof event.total_cost_usd==='number'?{reportedCostUsd:event.total_cost_usd}:{})};
           if (readyEvent(event,adapter.provider)) {
