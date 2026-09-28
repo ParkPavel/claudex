@@ -54,17 +54,19 @@ export async function syncWorkspace(ws) {
   for (const [name, role] of Object.entries(roles)) {
     const resolved = resolveAssignment(ws.config, name, role);
     const model = resolved.model ?? ws.config.models?.[resolved.provider] ?? null;
-    const text = `${role.purpose}\nRead ${path.join(ROOT, 'config/core.md').split(path.sep).join('/')} and the selected project profile. Use Claudex jobs for delegated work. Skill names: ${role.skills.join(', ')}.\n`;
+    const text = `${role.purpose}\nRead ${relHarness}/config/core.md (relative to the workspace root) and the selected project profile. Use Claudex jobs for delegated work. Skill names: ${role.skills.join(', ')}.\n`;
     if (resolved.provider === 'claude') files[`.claude/agents/${name}.md`] = `---\nname: ${name}\ndescription: ${JSON.stringify(role.purpose)}\n${model ? `model: ${model}\n` : ''}effort: ${resolved.effort}\ntools: Read, Glob, Grep${role.authority === 'workspace-write' ? ', Edit, Write' : ''}\n---\n${text}`;
     else files[`.codex/agents/${name}.toml`] = `name = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(role.purpose)}\nsandbox_mode = "read-only"\n${model ? `model = ${JSON.stringify(model)}\n` : ''}model_reasoning_effort = ${JSON.stringify(resolved.effort)}\ndeveloper_instructions = ${JSON.stringify(text)}\n`;
   }
   // Native discovery needs small SKILL.md files at each host's supported path.
   // They point to a single maintained body instead of copying that body twice.
+  // Paths are workspace-relative: an absolute one broke every stub when the
+  // workspace moved, and put a machine path into files a person may share.
   for (const skill of await fs.readdir(path.join(ROOT, 'skills'))) {
     const body = await fs.readFile(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
     const front = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     assert(front, `Missing frontmatter for ${skill}`);
-    const stub = `---\n${front[1]}\n---\nRead and follow the maintained skill at ${path.join(ROOT, 'skills', skill, 'SKILL.md').split(path.sep).join('/')} for this task.\n`;
+    const stub = `---\n${front[1]}\n---\nRead and follow the maintained skill at ${relHarness}/skills/${skill}/SKILL.md (relative to the workspace root) for this task.\n`;
     files[`.agents/skills/${skill}/SKILL.md`] = stub;
     files[`.claude/skills/${skill}/SKILL.md`] = stub;
   }

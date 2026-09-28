@@ -14,8 +14,9 @@ import { delegate, interactive, markUnavailable, panel, parseDelegationSpec, res
 import { approve, pending } from '../src/approvals.mjs';
 import { claim, readClaims, release, releaseFor } from '../src/claims.mjs';
 import { inspectAll, retire } from '../src/worktrees.mjs';
-import { runSetup } from '../src/setup.mjs';
+import { mergePrinciples, principlesSection, runSetup } from '../src/setup.mjs';
 import { validateConfig } from '../src/config.mjs';
+import { installHooks, runHook } from '../src/hooks.mjs';
 
 function args(input) {
   const out={_:[]};
@@ -71,6 +72,8 @@ modes --settle <delegation-id> --evidence <ref[,ref]>
 check-project                          Run the selected profile checks
 graph build [--code-only] | graph relink | graph trace | graph status  Build the project's code graph (vendored Graphify) or check it is current
 graph query|path|explain|affected|god-nodes <args>  Navigate the linked graph
+hook <session-start|handoff|pre-run|report-ready>  Claude Code hook entrypoints (read the event on stdin; never block)
+hooks --install                        Merge the Claudex hooks into .claude/settings.local.json
 scan --repo <path> [--history]         Inspect staged content or all history
 guard commit|push                      Git hook entrypoints
 
@@ -80,16 +83,26 @@ State, evidence and credentials never belong in the public repository.`);
     const root=path.resolve(text(options.workspace,process.cwd()));
     assert(interactiveTerminal(),'The setup window needs a terminal. Use init with explicit flags in a script.');
     const existing=await resolveWorkspace(root).catch(()=>null);
-    const choices=await terminalIO(io=>runSetup(io,{root:existing?.root??root,config:existing?.config??null,project:text(options.project)}));
+    const profileText=existing?await fs.readFile(path.join(existing.state,'project-profile.md'),'utf8').catch(()=>null):null;
+    const choices=await terminalIO(io=>runSetup(io,{root:existing?.root??root,config:existing?.config??null,project:text(options.project),profileText}));
     if(!choices){console.log('Nothing written.');process.exitCode=1;}
-    else if(existing) {
-      const config={...existing.config,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,...(choices.obsidian?{obsidian:choices.obsidian}:{})};
-      validateConfig(config,await readJSON(path.join(ROOT,'config/roles.json')));
-      await atomicJSON(path.join(existing.state,'workspace.json'),config);
-      print(await syncWorkspace({...existing,config}));
-    } else {
-      const ws=await initWorkspace({workspace:root,project:choices.project,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,obsidian:choices.obsidian,vault:text(options.vault)});
-      print({workspace:ws.root,project:ws.project,state:ws.state,access:ws.config.access});
+    else {
+      let ws;
+      if(existing) {
+        const config={...existing.config,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,...(choices.obsidian?{obsidian:choices.obsidian}:{})};
+        validateConfig(config,await readJSON(path.join(ROOT,'config/roles.json')));
+        await atomicJSON(path.join(existing.state,'workspace.json'),config);
+        ws={...existing,config};
+        await syncWorkspace(ws);
+      } else ws=await initWorkspace({workspace:root,project:choices.project,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,obsidian:choices.obsidian,vault:text(options.vault)});
+      const profileFile=path.join(ws.state,'project-profile.md');
+      await fs.writeFile(profileFile,mergePrinciples(await fs.readFile(profileFile,'utf8').catch(()=>''),principlesSection(choices.principles)));
+      const hooks=choices.hooks?await installHooks(ws):null;
+      // The installation is finished when doctor says so, not when the files exist.
+      const health=await doctor(ws);
+      print({workspace:ws.root,project:ws.project,access:ws.config.access,principles:profileFile,hooks:hooks?.file??null,
+        doctor:health.checks.map(c=>`${c.status} ${c.name}${c.status==='FAIL'?`: ${typeof c.detail==='string'?c.detail:JSON.stringify(c.detail)}`:''}`)});
+      if(!health.ok)process.exitCode=1;
     }
   } else if(command==='init') {
     assert(options.workspace && options.project,'init requires --workspace and --project');
@@ -101,6 +114,15 @@ State, evidence and credentials never belong in the public repository.`);
     const executables=text(options['obsidian-executable'])?{obsidian:text(options['obsidian-executable'])}:{};
     const ws=await initWorkspace({...options,access:text(options.access,'approval'),obsidian,executables});
     print({workspace:ws.root,project:ws.project,state:ws.state,access:ws.config.access});
+  } else if(command==='hook') {
+    // A hook fails open: whatever goes wrong, the session, turn or tool call proceeds.
+    try {
+      let raw='';if(!process.stdin.isTTY)for await(const chunk of process.stdin)raw+=chunk;
+      let input={};try{input=JSON.parse(raw||'{}');}catch{}
+      const ws=await resolveWorkspace(options.workspace || input.cwd || process.cwd());
+      const output=await runHook(ws,options._[1],input);
+      if(output)process.stdout.write(JSON.stringify(output));
+    } catch {}
   } else if(command==='scan') {
     const result=await scan(path.resolve(options.repo || '.'),{history:options.history===true});print(result);if(!result.ok)process.exitCode=1;
   } else if(command==='guard') {
@@ -199,6 +221,10 @@ State, evidence and credentials never belong in the public repository.`);
       print(result);
     }
     else if(command==='cancel')print(await cancel(ws,options._[1]));
+    else if(command==='hooks') {
+      assert(options.install===true,'Use hooks --install');
+      print(await installHooks(ws));
+    }
     else if(command==='wait') {
       const minutes=Number(text(options['timeout-min'],'40'));
       assert(minutes>0,'--timeout-min must be a positive number');

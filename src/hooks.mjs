@@ -1,0 +1,198 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { ROOT, atomicJSON, exists, git, readJSON } from './io.mjs';
+import { validatePacket } from './adapters.mjs';
+import { validateTaskPacket } from './tasks.mjs';
+import { requireWriteAuthority } from './approvals.mjs';
+import { listJobs, TERMINAL } from './jobs.mjs';
+import { status as modeStatus } from './modes.mjs';
+
+// Claude Code hooks that carry Claudex state across sessions and turns. They
+// started as local scripts next to one workspace and kept being forgotten or
+// copied with a hard-coded path; here they read the workspace they are given.
+//
+// Every hook fails open: a broken probe must never stop a session, a turn or a
+// tool call. The pre-run gate is a convenience ahead of the boundary, not the
+// boundary: it asks the same functions that `run` asks, so it cannot drift from
+// them, and a job is checked again when it starts.
+
+export const HOOKS = ['session-start','handoff','pre-run','report-ready'];
+const FRESH_MS = 6 * 60 * 60 * 1000;
+const MAX_REPORTS = 3;
+const MAX_CONTEXT = 2000;
+const handoffJournal = ws => path.join(ws.state,'reports','handoff.jsonl');
+const seenFile = ws => path.join(ws.state,'reports','.reported-jobs.json');
+const quiet = async fn => { try { return await fn(); } catch { return null; } };
+
+async function projectState(ws) {
+  const run = async args => (await git(ws.project,args)).trim();
+  const trees = (await run(['worktree','list'])).split('\n').filter(Boolean).slice(1);
+  return {
+    branch: await run(['rev-parse','--abbrev-ref','HEAD']),
+    head: (await run(['rev-parse','HEAD'])).slice(0,12),
+    dirty: (await run(['status','--porcelain'])).split('\n').filter(Boolean).length,
+    trees,
+  };
+}
+
+/** SessionStart: who answers for which role, what is owed, where the project stands. */
+export async function sessionStart(ws) {
+  const lines = [];
+  try {
+    const assigned = Object.entries(ws.config.assignments ?? {}).map(([role,a]) => `${role}=${a.provider ?? 'default'}${a.model ? `/${a.model}` : ''}${a.effort ? `@${a.effort}` : ''}`);
+    lines.push(`Claudex: project ${ws.config.project}, profile ${ws.config.profile}, access ${ws.config.access}.`);
+    lines.push(`Role assignments: ${assigned.length ? assigned.join(', ') : 'role table defaults'}; codex default model ${ws.config.models?.codex ?? 'unset'}.`);
+    const jobs = await listJobs(ws);
+    const modes = await modeStatus(ws,jobs);
+    const unavailable = Object.entries(modes.providers).filter(([,p]) => p.available === false).map(([name]) => name);
+    lines.push(`Provider mode: ${modes.mode}${unavailable.length ? `; unavailable: ${unavailable.join(', ')}` : ''}.`);
+    for (const entry of modes.open) lines.push(`OPEN DELEGATION ${entry.id}: ${entry.substitute} answers for ${entry.unavailable} (${entry.roles.join(', ')}). Its verdicts are single-model proposals, not independent review.`);
+    for (const debt of modes.debt) lines.push(`RE-CHECK OWED under ${debt.delegation}: ${debt.jobs.map(j => j.taskId).join(', ')}. Settled by re-running at the restored provider, not by closing the delegation.`);
+    const active = jobs.filter(job => !TERMINAL.has(job.status));
+    if (active.length) lines.push(`Active jobs: ${active.map(job => `${job.taskId} (${job.status})`).join(', ')}. Wait with: claudex wait --timeout-min 40`);
+    const state = await projectState(ws);
+    lines.push(`Project: ${state.branch} @ ${state.head}, ${state.dirty ? `${state.dirty} uncommitted change(s)` : 'clean tree'}.`);
+    if (state.trees.length) lines.push(`Worktrees: ${state.trees.length} — ${state.trees.join(' | ')}.`);
+  } catch (error) {
+    lines.push(`Claudex state could not be read: ${error.message}. Check with: claudex doctor`);
+  }
+  const last = await quiet(async () => (await fs.readFile(handoffJournal(ws),'utf8')).trim().split('\n').filter(Boolean).pop());
+  if (last) {
+    const entry = JSON.parse(last);
+    lines.push(`Last handoff (${entry.at}): ${entry.branch} @ ${entry.head}${entry.dirty ? ', tree was dirty' : ''}${entry.worktrees ? `, worktrees: ${entry.worktrees}` : ''}.`);
+  }
+  return { hookSpecificOutput:{ hookEventName:'SessionStart', additionalContext:lines.join('\n') }, suppressOutput:true };
+}
+
+/**
+ * Stop / SessionEnd: one line of state, so the next session resumes an exact
+ * snapshot instead of the newest conversation. Stop fires every turn, so a line
+ * is written only when the state changed; SessionEnd always writes.
+ */
+export async function handoff(ws, input = {}) {
+  await quiet(async () => {
+    const event = input.hook_event_name || 'Stop';
+    const state = await projectState(ws);
+    const approvals = await quiet(async () => (await fs.readdir(path.join(ws.state,'approvals'))).filter(name => name.endsWith('.json')).length) ?? 0;
+    const entry = { at:new Date().toISOString(), event, session:input.session_id ?? null, branch:state.branch, head:state.head, dirty:state.dirty, worktrees:state.trees.length, approvals };
+    entry.fingerprint = `${entry.branch}:${entry.head}:${entry.dirty}:${entry.worktrees}:${entry.approvals}`;
+    const file = handoffJournal(ws);
+    const previous = await quiet(async () => JSON.parse((await fs.readFile(file,'utf8')).trim().split('\n').filter(Boolean).pop()).fingerprint);
+    if (event === 'SessionEnd' || entry.fingerprint !== previous) {
+      await fs.mkdir(path.dirname(file),{recursive:true});
+      await fs.appendFile(file,`${JSON.stringify(entry)}\n`);
+    }
+  });
+  return { suppressOutput:true };
+}
+
+/**
+ * PreToolUse(Bash): a writing packet about to be run is checked by the same
+ * validation `run` performs, and refused early with the commands that fix it.
+ */
+export async function preRun(ws, input = {}) {
+  const command = input.tool_input?.command;
+  if (typeof command !== 'string') return null;
+  const match = command.match(/claudex\.mjs["']?\s+run\s+("[^"]+"|'[^']+'|[^\s"';&|]+)/);
+  if (!match) return null;
+  const file = path.resolve(input.cwd ?? ws.root, match[1].replace(/^["']|["']$/g,''));
+  const packet = await quiet(() => readJSON(file));
+  // claudex reports a missing or unreadable packet better than a hook can.
+  if (!packet || packet.authority !== 'workspace-write') return null;
+  const problems = [];
+  const fix = [];
+  try { await validatePacket(packet); } catch (error) { problems.push(error.message); }
+  if (packet.worktree && !(await exists(path.resolve(ws.root,packet.worktree)))) problems.push(`Worktree ${packet.worktree} does not exist`);
+  if (!packet.worktree || problems.some(p => /worktree/i.test(p))) fix.push(`claudex worktree ${packet.taskId} --base HEAD --paths ${(packet.paths ?? []).join(',') || '<paths>'}  (then put the printed path in the packet's "worktree")`);
+  try { await validateTaskPacket(ws,packet); } catch (error) { problems.push(error.message); if (/contract/i.test(error.message)) fix.push(`claudex task init ${packet.taskId} --goal "<goal>" --worktree <path>, then claudex task check ${packet.taskId}`); }
+  try { await requireWriteAuthority(ws,packet); } catch (error) { problems.push(error.message); if (/approv/i.test(error.message)) fix.push(`claudex approve ${packet.taskId} --reason "<why this writer may run>"`); }
+  if (!problems.length) return null;
+  const reason = `The writing job ${packet.taskId} (${packet.role}) is not ready:\n- ${[...new Set(problems)].join('\n- ')}${fix.length ? `\n\nFix with:\n  ${[...new Set(fix)].join('\n  ')}` : ''}`;
+  return { hookSpecificOutput:{ hookEventName:'PreToolUse', permissionDecision:'deny', permissionDecisionReason:reason } };
+}
+
+function summarise(job, result, postmortem) {
+  if (!result) {
+    if (!postmortem) return job.error ? `  ${String(job.error).slice(0,200)}` : '  (no result)';
+    const who = postmortem.provider ? `${postmortem.provider.provider}/${postmortem.provider.model ?? '?'}` : 'provider unknown';
+    return [
+      `  stopped at ${postmortem.failure?.stage ?? '?'} (${who}): ${String(postmortem.failure?.error ?? postmortem.failure?.providerError ?? 'no error text').slice(0,200)}`,
+      ...(postmortem.nextChecks ?? []).slice(0,3).map(line => `  - ${String(line).slice(0,200)}`),
+    ].join('\n');
+  }
+  const verdicts = (result.criteria ?? []).map(c => `${c.id}:${c.status}`).join(', ');
+  // The schema defines findings as defects, so they come first. A FAIL with no
+  // findings is the older shape, where defects were filed as criterion evidence.
+  const findings = (result.findings ?? []).slice(0,4).map(f => `  - ${String(f).slice(0,200)}`);
+  const failing = findings.length ? [] : (result.criteria ?? []).filter(c => c.status === 'FAIL').flatMap(c => (c.evidence ?? []).slice(0,3).map(e => `  ! ${c.id}: ${String(e).slice(0,200)}`));
+  const gaps = job.resultGaps?.missing?.length ? [`  no answer for: ${job.resultGaps.missing.join(', ')}`] : [];
+  return [verdicts ? `  verdicts: ${verdicts}` : '', ...findings, ...failing.slice(0,4), ...gaps].filter(Boolean).join('\n');
+}
+
+/**
+ * Stop: a finished job's verdict is carried into the next turn once. It never
+ * blocks stopping (a hook that forces a turn can loop) and stays silent when
+ * nothing new finished; old backlog is history, not news.
+ */
+export async function reportReady(ws, { now = Date.now() } = {}) {
+  const seen = new Set(await quiet(() => readJSON(seenFile(ws))) ?? []);
+  const ready = [];
+  for (const job of await listJobs(ws)) {
+    if (!TERMINAL.has(job.status) || seen.has(job.id)) continue;
+    seen.add(job.id);
+    const finished = Date.parse(job.updated ?? job.created ?? 0);
+    if (Number.isFinite(finished) && now - finished > FRESH_MS) continue;
+    const dir = job.artifactDirectory ?? path.join(ws.state,'artifacts',job.id);
+    const result = await quiet(() => readJSON(path.join(dir,'result.json')));
+    const postmortem = await quiet(() => readJSON(path.join(dir,'postmortem.json')));
+    ready.push(`${job.taskId} -> ${job.status}\n${summarise(job,result,postmortem)}\n  full result: ${path.join(dir,'result.json')}`);
+  }
+  await fs.mkdir(path.dirname(seenFile(ws)),{recursive:true});
+  await atomicJSON(seenFile(ws),[...seen]);
+  const fresh = ready.slice(-MAX_REPORTS);
+  if (!fresh.length) return null;
+  const text = `Claudex: reports ready (${fresh.length} of ${ready.length}):\n${fresh.join('\n')}`.slice(0,MAX_CONTEXT);
+  return { systemMessage:`Claudex: ${fresh.length} report(s) ready — see next turn's context`, suppressOutput:true, hookSpecificOutput:{ hookEventName:'Stop', additionalContext:text } };
+}
+
+export async function runHook(ws, name, input = {}) {
+  if (name === 'session-start') return sessionStart(ws);
+  if (name === 'handoff') return handoff(ws,input);
+  if (name === 'pre-run') return preRun(ws,input);
+  if (name === 'report-ready') return reportReady(ws);
+  throw new Error(`Unknown hook ${name}; one of ${HOOKS.join(', ')}`);
+}
+
+/**
+ * The hook block for .claude/settings.local.json. The generated settings.json
+ * is hash-checked by sync, so hooks live in the local layer; installing merges
+ * into whatever that file already holds and replaces only earlier Claudex
+ * entries, recognised by the command they run.
+ */
+export function hookSettings(ws) {
+  const cli = path.join(ROOT,'bin','claudex.mjs').split(path.sep).join('/');
+  const root = ws.root.split(path.sep).join('/');
+  const cmd = name => `node "${cli}" hook ${name} --workspace "${root}"`;
+  return {
+    SessionStart:[{ hooks:[{ type:'command', command:cmd('session-start'), timeout:20, statusMessage:'Reading Claudex state' }] }],
+    SessionEnd:[{ hooks:[{ type:'command', command:cmd('handoff'), timeout:20 }] }],
+    Stop:[{ hooks:[{ type:'command', command:cmd('handoff'), timeout:20, async:true }, { type:'command', command:cmd('report-ready'), timeout:15 }] }],
+    // Filtered in the shell first: starting node for every Bash call costs more
+    // than the gate is worth, and only a command naming claudex.mjs and run matters.
+    PreToolUse:[{ matcher:'Bash', hooks:[{ type:'command', command:`payload=$(cat); case "$payload" in *claudex.mjs*run*) printf '%s' "$payload" | ${cmd('pre-run')} ;; esac`, timeout:15 }] }],
+  };
+}
+const ours = entry => (entry.hooks ?? []).some(hook => / hook (session-start|handoff|pre-run|report-ready)\b/.test(hook.command ?? '') || /claudex[\\/]hooks[\\/][\w-]+\.mjs/.test(hook.command ?? ''));
+export function mergeHookSettings(current, wanted) {
+  const hooks = { ...(current.hooks ?? {}) };
+  for (const [event, entries] of Object.entries(wanted)) hooks[event] = [...(hooks[event] ?? []).filter(entry => !ours(entry)), ...entries];
+  return { ...current, hooks };
+}
+export async function installHooks(ws) {
+  const file = path.join(ws.root,'.claude','settings.local.json');
+  const current = (await exists(file)) ? await readJSON(file) : {};
+  const next = mergeHookSettings(current,hookSettings(ws));
+  await fs.mkdir(path.dirname(file),{recursive:true});
+  await atomicJSON(file,next);
+  return { file, events:Object.keys(hookSettings(ws)) };
+}
