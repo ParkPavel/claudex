@@ -60,15 +60,46 @@ export async function validatePacket(packet) {
   if (packet.mode === 'diff') assert(packet.base, 'Diff review requires a base');
   return role;
 }
+/**
+ * The text a provider gave for its own refusal. Claude reports a spent limit as
+ * a result event whose `result` is the sentence; serialising the whole event
+ * instead buries it among usage counters, where a token count such as 14013
+ * reads as an HTTP 401 to the classifier.
+ */
+export function providerErrorText(event) {
+  if (typeof event.message === 'string') return event.message;
+  if (typeof event.error?.message === 'string') return event.error.message;
+  if (typeof event.result === 'string' && event.result.trim()) return event.result;
+  return JSON.stringify(event.error ?? event);
+}
+/**
+ * A result that answers some criteria and omits others is still an answer.
+ * Discarding it threw away finished reviews; accepting it silently would turn
+ * silence into a verdict. Each omitted criterion becomes UNKNOWN with the
+ * reason, and the gap is returned so the job records it. Invented criteria are
+ * dropped and named. Identity, duplicates, statuses and PASS evidence stay hard.
+ */
 export function validateResult(result, packet) {
   assert(result && result.taskId === packet.taskId, 'Result task identity mismatch');
-  assert(Array.isArray(result.criteria) && result.criteria.length === packet.criteria.length, 'Incomplete criterion results');
+  assert(Array.isArray(result.criteria), 'Missing criterion results');
   assert(new Set(result.criteria.map(c => c.id)).size === result.criteria.length, 'Duplicate criterion result');
+  const expectedIds = new Set(packet.criteria.map(c => c.id));
+  const unexpected = result.criteria.filter(c => !expectedIds.has(c.id)).map(c => String(c.id));
+  const missing = [];
+  const criteria = [];
   for (const expected of packet.criteria) {
     const found = result.criteria.find(c => c.id === expected.id);
-    assert(found && ['PASS','FAIL','UNKNOWN'].includes(found.status), 'Invalid criterion result');
+    if (!found) {
+      missing.push(expected.id);
+      criteria.push({ id: expected.id, status: 'UNKNOWN', evidence: ['The provider returned no result for this criterion.'] });
+      continue;
+    }
+    assert(['PASS','FAIL','UNKNOWN'].includes(found.status), 'Invalid criterion result');
     assert(Array.isArray(found.evidence) && found.evidence.every(e=>typeof e==='string' && e.trim()) && (found.status !== 'PASS' || found.evidence.length > 0), 'PASS requires evidence');
+    criteria.push(found);
   }
+  assert(missing.length < packet.criteria.length, 'No criterion results for this packet');
   assert(Array.isArray(result.findings) && Array.isArray(result.unknowns), 'Malformed findings or unknowns');
-  return result;
+  const gaps = missing.length || unexpected.length ? { missing, unexpected } : null;
+  return { result: { ...result, criteria }, gaps };
 }

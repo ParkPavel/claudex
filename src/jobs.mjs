@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, runtimeDigest, snapshot, withLock } from './io.mjs';
-import { prepareAdapter, readyEvent, resultEvent, validatePacket, validateResult } from './adapters.mjs';
+import { prepareAdapter, providerErrorText, readyEvent, resultEvent, validatePacket, validateResult } from './adapters.mjs';
 import { recordJob, resolve } from './modes.mjs';
 import { resolveAssignment } from './config.mjs';
 import { consume, requireWriteAuthority } from './approvals.mjs';
@@ -14,6 +14,8 @@ import { validateTaskPacket } from './tasks.mjs';
 import { projectGraph } from './graph.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
+export const STOP_RETRY_MS = 5000;
+export const STOP_GRACE_MS = 30000;
 export function jobFile(ws, id) {
   assert(/^[a-zA-Z0-9_-]+$/.test(id), 'Invalid job ID');
   return path.join(ws.state,'jobs',`${id}.json`);
@@ -68,11 +70,70 @@ export async function submit(ws, packet, { start = true } = {}) {
   }
   return { jobId: id, status: job.status };
 }
+export function processAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid,0); return true; } catch (error) { return error.code === 'EPERM'; }
+}
+/**
+ * A cancellation file is read by the worker, so a job whose worker died with
+ * its session would stay RUNNING forever and was once closed by editing its
+ * JSON by hand. When the worker is gone and its provider child is gone too, the
+ * record is closed here. A surviving child is named and left alone: nothing
+ * replaces a worker whose process is not confirmed terminated.
+ */
 export async function cancel(ws, id) {
-  const job = await readJSON(jobFile(ws,id));
+  const file = jobFile(ws,id);
+  const job = await readJSON(file);
   if (TERMINAL.has(job.status)) return { jobId:id, status:job.status };
+  if (job.workerPid && !processAlive(job.workerPid)) {
+    assert(!processAlive(job.childPid),`Worker ${job.workerPid} is gone but provider process ${job.childPid} still runs; end it, then cancel again`);
+    return withLock(ws.state, async () => {
+      const current = await readJSON(file);
+      if (TERMINAL.has(current.status)) return { jobId:id, status:current.status };
+      const error = `orphaned: worker ${current.workerPid}${current.childPid ? ` and child ${current.childPid}` : ''} ended without closing the job`;
+      Object.assign(current,{ status:'CANCELLED', error, acceptance:'UNKNOWN', updated:new Date().toISOString() });
+      await atomicJSON(file,current);
+      await release(ws,id).catch(()=>{});
+      return { jobId:id, status:'CANCELLED', orphaned:true, error };
+    });
+  }
   await fs.writeFile(path.join(ws.state,'jobs',`${id}.cancel`),'cancel\n',{ mode:0o600 });
   return { jobId:id, status:'CANCELLATION_REQUESTED' };
+}
+
+/**
+ * Wait for jobs to reach a terminal state and return what a coordinator needs
+ * to act on: status, per-criterion verdicts, findings, gaps and the postmortem.
+ * Polling a file is the only signal a detached worker leaves; a caller that runs
+ * this in the background is woken by its exit instead of polling by hand.
+ */
+export async function waitForJobs(ws, ids, { timeoutMs = 40*60000, intervalMs = 5000 } = {}) {
+  if (!ids.length) ids = (await listJobs(ws)).filter(j => !TERMINAL.has(j.status)).map(j => j.id);
+  const deadline = Date.now() + timeoutMs;
+  const done = new Map();
+  while (done.size < ids.length) {
+    for (const id of ids) {
+      if (done.has(id)) continue;
+      const job = await readJSON(jobFile(ws,id));
+      if (TERMINAL.has(job.status)) done.set(id, await verdict(job));
+    }
+    if (done.size === ids.length || Date.now() >= deadline) break;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  const pending = ids.filter(id => !done.has(id));
+  return { jobs:[...done.values()], pending, timedOut:pending.length > 0 };
+}
+async function verdict(job) {
+  let result = null;
+  if (job.artifactDirectory) result = await readJSON(path.join(job.artifactDirectory,'result.json')).catch(()=>null);
+  return {
+    id:job.id, taskId:job.taskId, status:job.status, proposedAcceptance:job.proposedAcceptance ?? null,
+    model:job.runtime?.model ?? job.requested?.model ?? null,
+    criteria:result?.criteria?.map(c => ({ id:c.id, status:c.status })) ?? null,
+    findings:result?.findings ?? null, unknowns:result?.unknowns ?? null,
+    resultGaps:job.resultGaps ?? null, error:job.error ?? null,
+    providerFailure:job.providerFailure ?? null, termination:job.termination ?? null, postmortem:job.postmortem ?? null,
+  };
 }
 export async function runWorker(ws,id) {
   const file = jobFile(ws,id);
@@ -188,7 +249,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
           // with a plain code. Keeping that text is the difference between
           // "exited unsuccessfully (1)" and "this model needs a newer CLI".
           if (event.type === 'error' || event.type === 'turn.failed' || event.is_error) {
-            providerError = typeof event.message === 'string' ? event.message : JSON.stringify(event.error ?? event);
+            providerError = providerErrorText(event);
           }
           const answer = resultEvent(event,adapter.provider);
           if (answer) result = answer;
@@ -196,19 +257,32 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
       }
     });
     child.stderr.on('data',chunk => { if (stderr.length < maximumOutput) stderr += chunk.toString(); });
-    let heartbeatBusy = false;
+    // A stop is a request until the process tree is gone. 'close' waits for every
+    // holder of the pipes, so a grandchild that survives taskkill (Codex under
+    // the elevated Windows sandbox) once kept a timed-out job RUNNING for hours.
+    // The kill is repeated, and after STOP_GRACE_MS the worker stops waiting and
+    // records that termination was not confirmed instead of hanging.
+    let heartbeatBusy = false, settleExit = null, stopRequestedAt = null, lastKill = 0;
     const interval = setInterval(async () => {
       if (heartbeatBusy) return;
       heartbeatBusy = true;
       try {
-        if (await exists(cancellation)) stopped = 'CANCELLED';
-        if ((!ready && Date.now()-started > ws.config.readyTimeoutMs) || Date.now()-started > ws.config.runTimeoutMs) stopped = 'TIMED_OUT';
-        if (stopped) await stopTree(child);
+        if (!stopped && await exists(cancellation)) stopped = 'CANCELLED';
+        if (!stopped && ((!ready && Date.now()-started > ws.config.readyTimeoutMs) || Date.now()-started > ws.config.runTimeoutMs)) stopped = 'TIMED_OUT';
+        if (stopped) {
+          stopRequestedAt ??= Date.now();
+          if (Date.now()-lastKill >= STOP_RETRY_MS) { lastKill = Date.now(); await stopTree(child); }
+          if (Date.now()-stopRequestedAt > STOP_GRACE_MS) {
+            child.stdout.destroy(); child.stderr.destroy();
+            settleExit?.({ code:null, signal:null, unconfirmed:true });
+          }
+        }
         else if (ready && job.status === 'STARTING') await save('RUNNING',{readyAt:new Date().toISOString()});
-      } catch { stopped = 'FAILED'; await stopTree(child); }
+      } catch { stopped ??= 'FAILED'; await stopTree(child); }
       finally { heartbeatBusy = false; }
     },250);
-    const exit = await new Promise((resolve,reject) => { child.once('error',reject); child.once('close',(code,signal)=>resolve({code,signal})); child.stdin.on('error',()=>{}); child.stdin.end(prompt); }).finally(()=>clearInterval(interval));
+    const exit = await new Promise((resolve,reject) => { settleExit = resolve; child.once('error',reject); child.once('close',(code,signal)=>resolve({code,signal})); child.stdin.on('error',()=>{}); child.stdin.end(prompt); }).finally(()=>clearInterval(interval));
+    if (stopRequestedAt) job.termination = { requestedAt:new Date(stopRequestedAt).toISOString(), confirmed:!exit.unconfirmed, pid:child.pid };
     while (heartbeatBusy) await new Promise(r=>setTimeout(r,10));
     await fs.writeFile(path.join(artifactDir,'events.jsonl'),stdout,{flag:'wx',mode:0o600});
     await fs.writeFile(path.join(artifactDir,'stderr.log'),stderr,{flag:'wx',mode:0o600});
@@ -226,7 +300,9 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     assert(exit.code === 0,`Worker exited unsuccessfully (${exit.code}); inspect local artifacts`);
     assert(ready,'No provider readiness event received');
     assert(result,`No structured result received${parseError ? '; inspect local event stream' : ''}`);
-    validateResult(result,packet);
+    const checked = validateResult(result,packet);
+    result = checked.result;
+    if (checked.gaps) job.resultGaps = checked.gaps;
     await fs.writeFile(path.join(artifactDir,'result.json'),JSON.stringify(result,null,2),{flag:'wx',mode:0o600});
     // A model verdict is a proposal. An independent acceptance record remains mandatory.
     job.proposedAcceptance = result.criteria.some(c=>c.status==='FAIL') ? 'FAIL' : result.criteria.some(c=>c.status==='UNKNOWN') ? 'UNKNOWN' : 'PASS';
@@ -273,6 +349,7 @@ export function buildPostmortem(job,{changed=[],repo=null}={}) {
   if (!started) nextChecks.push('Failed before the provider started; resolve the error above before resubmitting.');
   else if (stage === 'STARTING') nextChecks.push('The provider never reported readiness: check the executable, authentication and connectivity with claudex doctor.');
   else if (job.status === 'TIMED_OUT' && providerFailure?.kind !== 'NETWORK') nextChecks.push('The run exceeded runTimeoutMs: narrow the packet, or raise the limit deliberately.');
+  if (job.termination && !job.termination.confirmed) nextChecks.push(`Termination of provider process ${job.termination.pid} was not confirmed; make sure it has ended before resubmitting.`);
   if (started) nextChecks.push('Read events.jsonl and stderr.log in the artifact directory before retrying.');
   if (job.before && job.after && job.before.digest !== job.after.digest && packet.authority !== 'workspace-write') nextChecks.push('Source changed while a read-only job ran; its partial output describes no single snapshot.');
   if (changed.length) nextChecks.push(`Uncommitted changes remain in ${repo ?? 'the repository'} (${changed.length}): ${changed.slice(0,10).join(', ')}${changed.length>10?', ...':''}. Inspect, keep or retire them before retrying; a retry starts from this state.`);
@@ -325,7 +402,8 @@ const FAILURE_SIGNATURES = [
   // Codex reports a lost network as "waiting for network (Connection failed:
   // error sending request)" or "stream disconnected before completion".
   [/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|can't reach|DNS|os error 1100[14]|waiting for network|connection failed: error sending request|stream disconnected before completion/i,'NETWORK'],
-  [/usage limit|quota|rate.?limit|insufficient_quota|credit/i,'QUOTA'],
+  // Codex says "usage limit"; Claude says "session limit" or "weekly limit".
+  [/usage limit|session limit|weekly limit|hit your \w+ limit|quota|rate.?limit|insufficient_quota|credit/i,'QUOTA'],
   [/requires a newer version|unsupported model|unknown model|model_not_found|does not (?:exist|support)|invalid_request_error/i,'MODEL'],
   [/oauth|unauthori[sz]ed|forbidden|401|403|not allowed|login/i,'AUTH'],
   [/ENOENT|not recognized|command not found|no such file/i,'EXECUTABLE'],

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { assert, atomicJSON, readJSON, resolveWorkspace, ROOT, snapshot } from '../src/io.mjs';
 import { initWorkspace, syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { doctor } from '../src/doctor.mjs';
-import { submit, runWorker, inspectJobs, cancel, jobFile, listJobs, TERMINAL } from '../src/jobs.mjs';
+import { submit, runWorker, inspectJobs, cancel, listJobs, waitForJobs } from '../src/jobs.mjs';
 import { scan, preCommit, prePush } from '../src/security.mjs';
 import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
@@ -55,7 +55,8 @@ worktree --retire <path> [--force --reason <text>] [--keep-branch]
 claims [--release <id>]                Show or release declared work scopes
 approve <task-id> --reason <text>      Issue a one-shot approval for one writing task
 run <packet.json> [--wait]             Submit a versioned provider job
-status [job-id] | cancel <job-id>      Inspect/cancel the exact job
+status [job-id] | cancel <job-id>      Inspect/cancel the exact job; cancel closes a job whose worker died
+wait [job-id ...] [--timeout-min <n>]  Block until the jobs (default: every active one) finish; exit 2 on timeout
 status --summary                     Compact job states without packets/transcripts
 task init <id> --goal <text> [--kind feature|bug|maintenance] [--worktree <path>]
 task check <id>                       Validate the local contract before implementation
@@ -161,7 +162,8 @@ State, evidence and credentials never belong in the public repository.`);
     else if(command==='run') {
       const result=await submit(ws,await readJSON(path.resolve(options._[1])));print(result);
       if(options.wait) {
-        while(true) { const job=await readJSON(jobFile(ws,result.jobId));if(TERMINAL.has(job.status)){print(job);if(job.status!=='COMPLETED')process.exitCode=1;break;}await new Promise(r=>setTimeout(r,500)); }
+        const waited=await waitForJobs(ws,[result.jobId],{timeoutMs:Number.MAX_SAFE_INTEGER,intervalMs:500});
+        print(waited.jobs[0]);if(waited.jobs[0].status!=='COMPLETED')process.exitCode=1;
       }
     } else if(command==='worker')await runWorker(ws,options._[1]);
     else if(command==='status') {
@@ -197,6 +199,13 @@ State, evidence and credentials never belong in the public repository.`);
       print(result);
     }
     else if(command==='cancel')print(await cancel(ws,options._[1]));
+    else if(command==='wait') {
+      const minutes=Number(text(options['timeout-min'],'40'));
+      assert(minutes>0,'--timeout-min must be a positive number');
+      const waited=await waitForJobs(ws,options._.slice(1),{timeoutMs:minutes*60000});
+      print(waited);
+      process.exitCode=waited.timedOut?2:waited.jobs.every(job=>job.status==='COMPLETED')?0:1;
+    }
     else if(command==='obsidian')print(await obsidian(ws,options._[1],options.params?JSON.parse(options.params):{},{write:options.write===true}));
     else if(command==='modes') {
       const report=async()=>modeStatus(ws,await listJobs(ws));
