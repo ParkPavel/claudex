@@ -136,6 +136,27 @@ test('an earlier workspace-wide ledger still counts, and a cut report keeps its 
   assert.ok(text.length<=2000,String(text.length));
 });
 
+test('sessions keep separate ledgers holding only fresh IDs, and abandoned ones are removed',async t=>{
+  const ws=await fixture(t);
+  const now=Date.now();
+  const at=ms=>new Date(now-ms).toISOString();
+  await atomicJSON(jobFile(ws,'new'),{id:'new',taskId:'new',status:'FAILED',updated:at(60000),error:'x'});
+  await atomicJSON(jobFile(ws,'aged'),{id:'aged',taskId:'aged',status:'FAILED',updated:at(7*3600000),error:'x'});
+  const dir=path.join(ws.state,'reports','seen');
+  await fs.mkdir(dir,{recursive:true});
+  await atomicJSON(path.join(dir,'gone.json'),['x']);
+  const old=new Date(now-8*24*3600000);
+  await fs.utimes(path.join(dir,'gone.json'),old,old);
+  await reportReady(ws,{now,session:'A'});
+  await reportReady(ws,{now,session:'B'});
+  const files=(await fs.readdir(dir)).sort();
+  assert.deepEqual(files,['A.json','B.json']);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir,'A.json'),'utf8')),['new']);
+  const odd=await reportReady(ws,{now,session:'../../escape'});
+  assert.equal(odd.hookSpecificOutput.hookEventName,'UserPromptSubmit');
+  assert.ok((await fs.readdir(dir)).every(name=>/^[\w-]+\.json$/.test(name)));
+});
+
 test('reports that do not fit wait for the next prompt instead of being lost',async t=>{
   const ws=await fixture(t);
   const now=Date.parse('2026-09-28T12:00:00Z');

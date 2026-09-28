@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ROOT, atomicJSON, exists, git, readJSON } from './io.mjs';
@@ -142,28 +143,42 @@ function summarise(job, result, postmortem) {
  * another hook blocks is never sent, and a hook cannot learn that; its
  * reports stay readable through `wait` and `status`.
  */
+// One file per session: two sessions never rewrite the same file, so neither
+// can erase what the other recorded. Only IDs inside the freshness window are
+// kept (older jobs are filtered out anyway), and a session file untouched for a
+// week is removed, so the ledger stays small however long the workspace lives.
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const sessionDir = ws => path.join(ws.state,'reports','seen');
+const sessionFile = (ws, session) => path.join(sessionDir(ws), `${/^[\w-]{1,80}$/.test(session) ? session : crypto.createHash('sha256').update(session).digest('hex').slice(0,32)}.json`);
 async function readSeen(ws, session) {
-  const stored = await quiet(() => readJSON(seenFile(ws)));
   // An earlier version kept one list for the whole workspace; it still counts for every session.
-  const ledger = Array.isArray(stored) ? { '*':stored } : (stored ?? {});
-  return { ledger, seen:new Set([...(ledger['*'] ?? []), ...(ledger[session] ?? [])]) };
+  const legacy = await quiet(() => readJSON(seenFile(ws)));
+  const own = await quiet(() => readJSON(sessionFile(ws,session)));
+  return new Set([...(Array.isArray(legacy) ? legacy : []), ...(Array.isArray(own) ? own : [])]);
 }
-async function writeSeen(ws, session, ledger, seen) {
-  await fs.mkdir(path.dirname(seenFile(ws)),{recursive:true});
-  await atomicJSON(seenFile(ws),{ ...ledger, [session]:[...seen].filter(id => !(ledger['*'] ?? []).includes(id)) });
+async function writeSeen(ws, session, seen, jobs, now) {
+  const fresh = new Set(jobs.filter(job => !(now - Date.parse(job.updated ?? job.created ?? 0) > FRESH_MS)).map(job => job.id));
+  await fs.mkdir(sessionDir(ws),{recursive:true});
+  await atomicJSON(sessionFile(ws,session),[...seen].filter(id => fresh.has(id)));
+  for (const name of await quiet(() => fs.readdir(sessionDir(ws))) ?? []) {
+    const file = path.join(sessionDir(ws),name);
+    const stat = await quiet(() => fs.stat(file));
+    if (stat && now - stat.mtimeMs > SESSION_TTL_MS) await quiet(() => fs.rm(file,{force:true}));
+  }
 }
 export async function reportReady(ws, { now = Date.now(), event = 'UserPromptSubmit', session = 'default' } = {}) {
   if (event === 'Stop') {
-    const { seen } = await readSeen(ws,session);
+    const seen = await readSeen(ws,session);
     const waiting = (await listJobs(ws)).filter(job => TERMINAL.has(job.status) && !seen.has(job.id) && !(now - Date.parse(job.updated ?? job.created ?? 0) > FRESH_MS));
     return waiting.length ? { systemMessage:`Claudex: ${waiting.length} job report(s) ready; they reach Claude with your next message.`, suppressOutput:true } : null;
   }
   return deliverReports(ws, now, session);
 }
 async function deliverReports(ws, now, session) {
-  const { ledger, seen } = await readSeen(ws,session);
+  const seen = await readSeen(ws,session);
+  const jobs = await listJobs(ws);
   const ready = [];
-  for (const job of (await listJobs(ws)).sort((a,b) => String(a.updated ?? '').localeCompare(String(b.updated ?? '')))) {
+  for (const job of [...jobs].sort((a,b) => String(a.updated ?? '').localeCompare(String(b.updated ?? '')))) {
     if (!TERMINAL.has(job.status) || seen.has(job.id)) continue;
     const finished = Date.parse(job.updated ?? job.created ?? 0);
     // Backlog is marked seen silently; a fresh report is marked only once shown.
@@ -194,7 +209,7 @@ async function deliverReports(ws, now, session) {
     used += block.length + 1;
     seen.add(job.id);
   }
-  await writeSeen(ws,session,ledger,seen);
+  await writeSeen(ws,session,seen,jobs,now);
   if (!blocks.length) return null;
   const text = `Claudex: reports ready (${blocks.length} of ${ready.length}${ready.length > blocks.length ? '; the rest follow with the next prompt' : ''}):\n${blocks.join('\n')}`;
   return { suppressOutput:true, hookSpecificOutput:{ hookEventName:'UserPromptSubmit', additionalContext:text } };
