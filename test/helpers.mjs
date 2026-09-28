@@ -5,7 +5,7 @@ import { git, atomicJSON } from '../src/io.mjs';
 import { initWorkspace } from '../src/workspace.mjs';
 
 export async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
   const project=path.join(root,'project');await fs.mkdir(project);
   await git(project,['init','-b','feature/test']);

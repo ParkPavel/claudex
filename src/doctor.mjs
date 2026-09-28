@@ -72,6 +72,8 @@ export async function doctor(ws) {
     const debt=debtFromJobs(state,await listJobs(ws));
     const owed=debt.reduce((total,item)=>total+item.jobs.length,0);
     if(owed)throw new Error(`${owed} job(s) answered by a substitute still owe a re-check: claudex modes --debt`);
+    const unavailable=Object.entries(state.providers).filter(([,info])=>info.available===false);
+    if(unavailable.length)throw new Error(`Provider availability needs attention: ${unavailable.map(([name,info])=>`${name}: ${info.reason}`).join('; ')}. A CLI version check does not verify quota. Probe the provider and use modes --restore only after success.`);
     return {mode:mode(state),open:state.open.map(entry=>`${entry.unavailable} → ${entry.substitute}`)};
   });
   await check('approvals',async()=> {

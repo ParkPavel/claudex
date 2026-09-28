@@ -8,9 +8,14 @@ import { CONFIG_VERSION, defaultConfig, migrateConfig, resolveAssignment, valida
 import { syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { submit } from '../src/jobs.mjs';
 import { approve, readApproval } from '../src/approvals.mjs';
-import { chooseAssignments, frame, projectProblem, runSetup, summary, wrap } from '../src/setup.mjs';
+import { chooseAssignments, chooseObsidian, frame, projectProblem, runSetup, summary, wrap } from '../src/setup.mjs';
 
 const roles = () => readJSON(new URL('../config/roles.json', import.meta.url));
+
+// The environment frame is shown first; tests supply it instead of launching CLIs.
+const probe = async () => [{ name:'node', found:true, version:'v22.0.0', problem:null }];
+// Working principles (four answers, defaults kept) and the hooks question follow the roles.
+const PRINCIPLES = ['','','',''];
 
 const scripted = answers => {
   const written = [];
@@ -100,6 +105,7 @@ test('the setup window refuses a folder that is not a repository of its own',asy
  const ws=await fixture(t);
  assert.match(await projectProblem(ws.root,''),/Name the folder/);
  assert.match(await projectProblem(ws.root,'.'),/cannot be the managed project/);
+ assert.match(await projectProblem(ws.root,path.dirname(ws.root)),/outside the workspace/);
  assert.match(await projectProblem(ws.root,'missing'),/does not exist/);
  await fs.mkdir(path.join(ws.root,'plain'),{recursive:true});
  assert.match(await projectProblem(ws.root,'plain'),/not a Git root/);
@@ -114,10 +120,12 @@ test('the setup window collects a full configuration and shows it back',async t=
   '',                                    // lead: keep the default
   'codex/gpt-5.6-terra@max',             // architect: another provider, model and effort
   'skip',                                // keep every remaining role
+  ...PRINCIPLES,'no',                    // principles, hooks
   'yes',
  ]);
- const choices=await runSetup(io,{root:ws.root,roles:await roles()});
+ const choices=await runSetup(io,{root:ws.root,roles:await roles(),probe});
  assert.equal(choices.project,'project');
+ assert.deepEqual([choices.principles.branch,choices.principles.merge,choices.hooks],['main','person',false]);
  assert.equal(choices.access,'full');
  assert.deepEqual(choices.models,{claude:'opus',codex:'gpt-6-astra'});
  // Only differences from the role default are stored; `high` is already the
@@ -127,6 +135,38 @@ test('the setup window collects a full configuration and shows it back',async t=
  assert.match(shown,/Managed project/);assert.match(shown,/\.local\/claudex\//);
  assert.match(shown,/approval.*one-shot|one-shot/s);
  assert.match(summary(choices),/architect: provider=codex model=gpt-5\.6-terra effort=max/);
+});
+
+test('the Obsidian profile collects the live vault boundary in the same window',async t=>{
+ const ws=await fixture(t);
+ const vaultPath=path.join(ws.root,'OBStests');
+ await fs.mkdir(vaultPath);
+ const { io, written }=scripted([
+  'project','obsidian','approval',
+  'claude','','codex','',
+  'obsidian','OBStests',vaultPath,'yes',
+  'skip',...PRINCIPLES,'no','yes',
+ ]);
+ const choices=await runSetup(io,{root:ws.root,roles:await roles(),probe});
+ assert.equal(choices.executables.obsidian,'obsidian');
+ assert.deepEqual(choices.obsidian,{vault:'OBStests',vaultPath,testVault:true});
+ assert.match(written.join(''),/production vaults stay read-only/);
+ // The frame wraps at a width that depends on the temp path; read it as one line.
+ const flat=summary(choices).replace(/[│\s]+/g,' ');
+ assert.match(flat,/OBStests/);
+ assert.match(flat,/mutations allowed/);
+});
+
+test('an Obsidian vault path must be absolute and exist',async t=>{
+ const ws=await fixture(t);
+ const vaultPath=path.join(ws.root,'vault');
+ await fs.mkdir(vaultPath);
+ const { io, written }=scripted(['obsidian','Vault','relative',path.join(ws.root,'missing'),vaultPath,'no']);
+ const choice=await chooseObsidian(io,{});
+ assert.equal(choice.config.vaultPath,vaultPath);
+ assert.equal(choice.config.testVault,false);
+ assert.match(written.join(''),/absolute path/);
+ assert.match(written.join(''),/does not exist/);
 });
 
 test('the setup window says no instead of writing a configuration that cannot work',async t=>{
@@ -141,8 +181,8 @@ test('the setup window says no instead of writing a configuration that cannot wo
 
 test('a declined summary writes nothing',async t=>{
  const ws=await fixture(t);
- const { io }=scripted(['project','generic','approval','claude','','codex','gpt-6-astra','skip','no']);
- assert.equal(await runSetup(io,{root:ws.root,roles:await roles()}),null);
+ const { io }=scripted(['project','generic','approval','claude','','codex','gpt-6-astra','skip',...PRINCIPLES,'no','no']);
+ assert.equal(await runSetup(io,{root:ws.root,roles:await roles(),probe}),null);
 });
 
 test('native role definitions follow the installation, not the shipped table',async t=>{

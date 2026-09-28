@@ -1,6 +1,73 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 — 2026-09-28
+
+Task contracts, snapshot-bound evidence and a hardened job lifecycle, with setup, hooks and
+documentation for a first stable release. Reviewed across seven cross-model rounds (Codex
+gpt-5.6-sol); the last one found no P1 or P2 defect.
+
+- Lessons from 202 jobs of a working journal: Claude's session and weekly limits are
+  classified as QUOTA and a provider's refusal is kept as its own sentence; a result that omits
+  criteria is kept with those criteria UNKNOWN (`resultGaps`); a stop is retried and, when the
+  process tree does not close within thirty seconds, recorded as unconfirmed instead of hanging;
+  `cancel` closes a job whose worker died; `wait` replaces a hand-written watcher.
+- A reviewer bound to a task contract receives the coordinator's CURRENT check runs.
+- The setup window opens with the environment it found, offers the profile the project looks
+  like and its check-like scripts, records working principles into the local project profile,
+  installs the hooks and ends with `doctor`. Hooks are `claudex hook <name>`; `hooks --install`
+  merges them into `.claude/settings.local.json`. Generated stubs use workspace-relative paths.
+- `task check` warns where a valid contract promises what no check will show (after Spec
+  Kit's analyze): vague or duplicate criteria, placeholders, uncovered criteria, code without a
+  type checker or linter, checks the recorded principles require.
+- `retro` summarises the journal (after prompt-agent's session scoring).
+- `library/` keeps reference skills (Emil Kowalski's, MIT; a distilled Apple HIG, local
+  reference only), and the `native-ui-quality` skill routes UI work into it. Own skills carry
+  the journal's lessons (every failing suite's reason, assess/fix/re-test, environment first).
+
+- `task init|check|verify|record|converge` bind a feature or fix to a local contract and
+  report PASS, FAIL or UNKNOWN per criterion against current, snapshot-bound evidence.
+  `workflow.requireContract` makes writing jobs name their contract.
+- A job that ends FAILED or TIMED_OUT leaves `postmortem.json` next to its artifacts: what
+  the packet promised, the stage it stopped at, the provider and model, uncommitted changes
+  left in its repository and what to check before retrying. `status --summary` points at it.
+  A cancellation is a person's decision and gets no postmortem.
+- Task checks can run isolated (`isolate`) in a disposable copy with linked `node_modules`,
+  and compare a build's output with tracked and deployed files (`reproduces`, optional
+  `eol: "ignore"`). The obsidian profile's build check in `check-project` is isolated too, so
+  neither rewrites the checkout's bundle.
+- The result schema states that findings are defects only; confirmations go to evidence.
+- Graphify 0.9.66 is vendored in vendor/graphify with two changes proposed upstream: a
+  document's reference to code outside its extraction chunk is kept for the graph builder to
+  resolve instead of being dropped with the misattributed node, and on Windows the
+  PYTHONHASHSEED re-exec runs as a child process (the emulated exec crashed silently). `graph build|status|query|path|
+  explain` build the project graph outside the repository, add EXTRACTED/INFERRED document →
+  code links and list UNVERIFIED paths; a CURRENT graph's slice for a job's paths is projected
+  into its prompt. See docs/how-to/graph.md and docs/explanation/lineage.md (attribution and
+  thanks to Spec Kit, Superpowers and Graphify).
+- `graph trace` records the bundler's metafile from the project's own esbuild script, run
+  unchanged in an isolated copy, and merges it as EXTRACTED import, `bundled_into` and
+  `merged_into` edges. Default root-folder exclusions (releases, images, coverage) are anchored
+  as /name/**; node_modules and .git still match at any depth. Isolation redirects writes
+  relative to the working folder; it is not a sandbox (docs/how-to/graph.md).
+
+## 0.2.0 — 2026-09-13
+
+### Distributable setup
+
+- A clean source snapshot can be built as a self-contained ZIP with
+  `npm run release:archive`. The build verifies the archive, executes its CLI and writes a
+  SHA-256 checksum next to it.
+- `setup.cmd` and `setup.sh` start the existing installation window directly after unpacking;
+  no dependency installation is needed because Claudex has no runtime packages.
+- The `obsidian` profile now collects its executable, vault identity, absolute path and
+  test-mutation boundary in the setup window instead of requiring a manual JSON edit later.
+- Release archives omit tests, CI, hooks, contributor material and dated research evidence.
+  Those remain in the source repository; the installed harness keeps only runtime code,
+  maintained policy, focused skills and user documentation.
+- Focused skills no longer deep-link to the full research register; selecting a runtime skill
+  does not force an unrelated documentation read.
+- Installing Git hooks is now an explicit maintainer action (`npm run hooks:install`) rather
+  than a side effect of packing the project.
 
 ### Installing and adapting
 
@@ -55,4 +122,5 @@ Initial extraction of the shared agent harness into a separate public project.
 - Migration guidance and source-linked architectural decisions.
 
 This release establishes implementation contracts. Comparative model/skill effectiveness
-has not been established; see [validation](docs/research/validation.md).
+has not been established; see the online
+[validation notes](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).

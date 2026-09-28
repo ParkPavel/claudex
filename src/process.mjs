@@ -30,12 +30,22 @@ export async function runCommand(command, args, options = {}) {
   const spec = await commandSpec(command);
   return exec(spec.executable, [...spec.prefix, ...args], { windowsHide: true, timeout: 30000, maxBuffer: 16 * 1024 * 1024, ...options });
 }
-export function stopTree(child) {
-  if (!child.pid || child.exitCode !== null) return;
+/**
+ * Kill a process tree and say whether that succeeded. A failed kill must not be
+ * mistaken for a stopped tree: the caller records termination as unconfirmed.
+ * "No such process" counts as success; the tree is already gone.
+ */
+export async function stopTree(child) {
+  if (!child.pid || child.exitCode !== null) return true;
   if (process.platform === 'win32') {
-    return exec('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => {});
+    try { await exec('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }); return true; }
+    catch (error) { return error.code === 128; }
   }
-  try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+  try { process.kill(-child.pid, 'SIGKILL'); return true; }
+  catch (error) {
+    if (error.code === 'ESRCH') return true;
+    try { return child.kill('SIGKILL'); } catch { return false; }
+  }
 }
 export function spawnSpec(spec, args, cwd) {
   return spawn(spec.executable, [...spec.prefix, ...args], { cwd, windowsHide: true, shell: false, detached: process.platform !== 'win32', stdio: ['pipe','pipe','pipe'] });

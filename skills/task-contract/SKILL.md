@@ -17,4 +17,10 @@ unresolved conditions. A reviewer needs facts without an expected conclusion.
 One coordinator owns the journal. Resume by task ID, job ID and source digest. Cancel and
 confirm termination before replacing a worker. Missing readiness is not progress.
 
-Method and limits: [evidence register](../../docs/research/evidence-register.md).
+When delegating implementation of a feature, fix or multi-file maintenance task, include the
+local spec-workflow contract ID and the criterion IDs this packet covers. Check specification
+readiness with task check before dispatch; provider readiness is a separate runtime event.
+Keep the provider packet's authority and worktree rules; a task contract
+does not grant permissions. Prefer a small, bounded job on a cheaper configured model and
+escalate only when its actual result warrants it. Do not confuse the job's proposed PASS
+with the task's convergence report.

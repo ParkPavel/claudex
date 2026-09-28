@@ -64,3 +64,19 @@ test('pushing the baseline itself cannot exempt symlinks or submodules',async t=
   await assert.rejects(prePush(ws.project,'origin','https://example.invalid/repo',`refs/heads/test ${baseline} refs/heads/test ${'0'.repeat(40)}`),new RegExp(kind));
  }
 });
+
+// Built at run time so this file does not itself hold a user-home path.
+const home = ['C:', 'Users', 'alice'].join('/');
+const kinds = (file, text) => inspectBlob(file, Buffer.from(text)).map(f => f.kind);
+test('a machine path is flagged in our files, not in vendored examples',()=>{
+  assert.deepEqual(kinds('docs/a.md',`python: ${home}/tools/python.exe`),['private-machine-path']);
+  assert.deepEqual(kinds('vendor/lib/paths.py',`# Path("${home}") on POSIX keeps "C:"`),[]);
+  assert.deepEqual(kinds('docs/graph.md',`"python": "${['C:','Users','<you>'].join('/')}/tools/python.exe"`),[],'a placeholder is not a machine');
+});
+
+test('secrets are flagged everywhere, vendored code included',()=>{
+  const key = `sk-ant-${'a'.repeat(30)}`;
+  assert.deepEqual(kinds('vendor/lib/x.py',`token = "${key}"`),['provider-credential']);
+  assert.deepEqual(kinds('src/x.mjs',`const k = "${key}"`),['provider-credential']);
+  assert.deepEqual(kinds('.local/claudex/workspace.json','{}'),['private-path']);
+});

@@ -4,16 +4,20 @@ import path from 'node:path';
 import { assert, atomicJSON, readJSON, resolveWorkspace, ROOT, snapshot } from '../src/io.mjs';
 import { initWorkspace, syncWorkspace, createWorktree } from '../src/workspace.mjs';
 import { doctor } from '../src/doctor.mjs';
-import { submit, runWorker, inspectJobs, cancel, jobFile, listJobs, TERMINAL } from '../src/jobs.mjs';
+import { submit, runWorker, inspectJobs, cancel, listJobs, waitForJobs } from '../src/jobs.mjs';
 import { scan, preCommit, prePush } from '../src/security.mjs';
 import { obsidian } from '../src/obsidian.mjs';
 import { runCommand } from '../src/process.mjs';
+import { withIsolatedCopy } from '../src/isolate.mjs';
+import { buildGraph, graphCommand, graphStatus, relinkGraph, traceGraph } from '../src/graph.mjs';
 import { delegate, interactive, markUnavailable, panel, parseDelegationSpec, restore, settle, status as modeStatus } from '../src/modes.mjs';
 import { approve, pending } from '../src/approvals.mjs';
 import { claim, readClaims, release, releaseFor } from '../src/claims.mjs';
 import { inspectAll, retire } from '../src/worktrees.mjs';
-import { runSetup } from '../src/setup.mjs';
+import { mergePrinciples, principlesSection, runSetup } from '../src/setup.mjs';
 import { validateConfig } from '../src/config.mjs';
+import { installHooks, runHook } from '../src/hooks.mjs';
+import { retro } from '../src/retro.mjs';
 
 function args(input) {
   const out={_:[]};
@@ -29,6 +33,7 @@ const command=options._[0] || 'help';
 const print=value=>console.log(JSON.stringify(value,null,2));
 const text=(value,fallback=null)=>(value===undefined||value===true?fallback:String(value));
 const list=value=>(value&&value!==true?String(value).split(',').map(item=>item.trim()).filter(Boolean):null);
+const version=(await readJSON(path.join(ROOT,'package.json'))).version;
 // A window is only opened where a person can answer it; everywhere else the same
 // state is printed once, so a script never blocks on a prompt.
 const interactiveTerminal=()=>Boolean(process.stdin.isTTY&&process.stdout.isTTY);
@@ -40,10 +45,11 @@ async function terminalIO(fn) {
 }
 try {
   if(command==='help') {
-    console.log(`Claudex 0.1.0
+    console.log(`Claudex ${version}
 
 setup [--workspace <desktop>]          Open the installation window and write the configuration
-init --workspace <desktop> --project <folder> [--profile <name>] [--access full|scoped|approval] [--vault <name>]
+init --workspace <desktop> --project <folder> [--profile <name>] [--access full|scoped|approval]
+     [--vault <name> --vault-path <absolute-path> --test-vault --obsidian-executable <command>]
 settings [--access <mode>] [--assign <role>=<provider>[/<model>][@<effort>]] [--show]
 sync | doctor                          Verify/update generated entrypoints and inspect the workspace
 worktree <task-id> [--base <ref>] [--paths a,b]
@@ -51,13 +57,26 @@ worktree --retire <path> [--force --reason <text>] [--keep-branch]
 claims [--release <id>]                Show or release declared work scopes
 approve <task-id> --reason <text>      Issue a one-shot approval for one writing task
 run <packet.json> [--wait]             Submit a versioned provider job
-status [job-id] | cancel <job-id>      Inspect/cancel the exact job
+status [job-id] | cancel <job-id>      Inspect/cancel the exact job; cancel closes a job whose worker died
+cancel <job-id> --confirm-ended --reason <text>  Record that a stopped provider's process tree is gone
+wait [job-id ...] [--timeout-min <n>]  Block until the jobs (default: every active one) finish; exit 2 on timeout
+status --summary                     Compact job states without packets/transcripts
+task init <id> --goal <text> [--kind feature|bug|maintenance] [--worktree <path>]
+task check <id>                       Validate the local contract before implementation
+task verify <id> --check <check-id>   Run a declared check and bind evidence to source
+task record <id> --params <json>      Record an explicit, snapshot-bound observation
+task converge <id>                    Report PASS, FAIL or UNKNOWN for every criterion
 obsidian <operation> [--params <json>] [--write]
 modes [--status|--debt|--json]         Open the mode window; see who answers for whom
 modes --delegate codex:claude --reason <text> [--roles a,b] [--model <id>]
 modes --unavailable <provider> --reason <text> | --restore <provider> [--note <text>]
 modes --settle <delegation-id> --evidence <ref[,ref]>
 check-project                          Run the selected profile checks
+retro [--since <date>]                 Journal retrospective: failure causes, models, costs, UNKNOWN share
+graph build [--code-only] | graph relink | graph trace | graph status  Build the project's code graph (vendored Graphify) or check it is current
+graph query|path|explain|affected|god-nodes <args>  Navigate the linked graph
+hook <session-start|handoff|pre-run|report-ready>  Claude Code hook entrypoints (read the event on stdin; never block)
+hooks --install                        Merge the Claudex hooks into .claude/settings.local.json
 scan --repo <path> [--history]         Inspect staged content or all history
 guard commit|push                      Git hook entrypoints
 
@@ -67,21 +86,48 @@ State, evidence and credentials never belong in the public repository.`);
     const root=path.resolve(text(options.workspace,process.cwd()));
     assert(interactiveTerminal(),'The setup window needs a terminal. Use init with explicit flags in a script.');
     const existing=await resolveWorkspace(root).catch(()=>null);
-    const choices=await terminalIO(io=>runSetup(io,{root:existing?.root??root,config:existing?.config??null,project:text(options.project)}));
+    const profileText=existing?await fs.readFile(path.join(existing.state,'project-profile.md'),'utf8').catch(()=>null):null;
+    const choices=await terminalIO(io=>runSetup(io,{root:existing?.root??root,config:existing?.config??null,project:text(options.project),profileText}));
     if(!choices){console.log('Nothing written.');process.exitCode=1;}
-    else if(existing) {
-      const config={...existing.config,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables};
-      validateConfig(config,await readJSON(path.join(ROOT,'config/roles.json')));
-      await atomicJSON(path.join(existing.state,'workspace.json'),config);
-      print(await syncWorkspace({...existing,config}));
-    } else {
-      const ws=await initWorkspace({workspace:root,project:choices.project,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,vault:text(options.vault)});
-      print({workspace:ws.root,project:ws.project,state:ws.state,access:ws.config.access});
+    else {
+      let ws;
+      if(existing) {
+        const config={...existing.config,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,...(choices.obsidian?{obsidian:choices.obsidian}:{})};
+        validateConfig(config,await readJSON(path.join(ROOT,'config/roles.json')));
+        await atomicJSON(path.join(existing.state,'workspace.json'),config);
+        ws={...existing,config};
+        await syncWorkspace(ws);
+      } else ws=await initWorkspace({workspace:root,project:choices.project,profile:choices.profile,access:choices.access,assignments:choices.assignments,models:choices.models,executables:choices.executables,obsidian:choices.obsidian,vault:text(options.vault)});
+      const profileFile=path.join(ws.state,'project-profile.md');
+      await fs.writeFile(profileFile,mergePrinciples(await fs.readFile(profileFile,'utf8').catch(()=>''),principlesSection(choices.principles)));
+      const hooks=choices.hooks?await installHooks(ws):null;
+      // The installation is finished when doctor says so, not when the files exist.
+      const health=await doctor(ws);
+      print({workspace:ws.root,project:ws.project,access:ws.config.access,principles:profileFile,hooks:hooks?.file??null,
+        doctor:health.checks.map(c=>`${c.status} ${c.name}${c.status==='FAIL'?`: ${typeof c.detail==='string'?c.detail:JSON.stringify(c.detail)}`:''}`)});
+      if(!health.ok)process.exitCode=1;
     }
   } else if(command==='init') {
     assert(options.workspace && options.project,'init requires --workspace and --project');
-    const ws=await initWorkspace({...options,access:text(options.access,'approval'),vault:text(options.vault)});
+    const obsidian={
+      ...(text(options.vault)?{vault:text(options.vault)}:{}),
+      ...(text(options['vault-path'])?{vaultPath:path.resolve(text(options['vault-path']))}:{}),
+      ...(options['test-vault']===true?{testVault:true}:{}),
+    };
+    const executables=text(options['obsidian-executable'])?{obsidian:text(options['obsidian-executable'])}:{};
+    const ws=await initWorkspace({...options,access:text(options.access,'approval'),obsidian,executables});
     print({workspace:ws.root,project:ws.project,state:ws.state,access:ws.config.access});
+  } else if(command==='hook') {
+    // A hook fails open: whatever goes wrong, the session, turn or tool call proceeds.
+    try {
+      let raw='';if(!process.stdin.isTTY)for await(const chunk of process.stdin)raw+=chunk;
+      // The gate runs on every shell call; most never name Claudex.
+      if(options._[1]==='pre-run'&&!raw.includes('claudex.mjs'))process.exit(0);
+      let input={};try{input=JSON.parse(raw||'{}');}catch{}
+      const ws=await resolveWorkspace(options.workspace || input.cwd || process.cwd());
+      const output=await runHook(ws,options._[1],input);
+      if(output)process.stdout.write(JSON.stringify(output));
+    } catch {}
   } else if(command==='scan') {
     const result=await scan(path.resolve(options.repo || '.'),{history:options.history===true});print(result);if(!result.ok)process.exitCode=1;
   } else if(command==='guard') {
@@ -143,11 +189,55 @@ State, evidence and credentials never belong in the public repository.`);
     else if(command==='run') {
       const result=await submit(ws,await readJSON(path.resolve(options._[1])));print(result);
       if(options.wait) {
-        while(true) { const job=await readJSON(jobFile(ws,result.jobId));if(TERMINAL.has(job.status)){print(job);if(job.status!=='COMPLETED')process.exitCode=1;break;}await new Promise(r=>setTimeout(r,500)); }
+        const waited=await waitForJobs(ws,[result.jobId],{timeoutMs:Number.MAX_SAFE_INTEGER,intervalMs:500});
+        print(waited.jobs[0]);if(waited.jobs[0].status!=='COMPLETED')process.exitCode=1;
       }
     } else if(command==='worker')await runWorker(ws,options._[1]);
-    else if(command==='status')print(await inspectJobs(ws,options._[1]));
-    else if(command==='cancel')print(await cancel(ws,options._[1]));
+    else if(command==='status') {
+      const result=await inspectJobs(ws,options._[1]);
+      print(options.summary===true ? (Array.isArray(result)?result:[result]).map(job=>({
+        id:job.id,taskId:job.taskId,status:job.status,acceptance:job.acceptance,
+        evidenceFreshness:job.evidenceFreshness,updated:job.updated??job.created,
+        provider:job.runtime?.provider??null,model:job.runtime?.model??null,
+        usage:job.usage??null,
+        error:job.error??null,
+        postmortem:job.postmortem??null,
+      })) : result);
+    }
+    else if(command==='task') {
+      const tasks=await import('../src/tasks.mjs');
+      const operation=options._[1],id=options._[2];
+      let result;
+      if(operation==='init')result=await tasks.initTask(ws,{taskId:id,goal:text(options.goal),kind:text(options.kind,'feature'),worktree:text(options.worktree)});
+      else if(operation==='check') {
+        result=await tasks.checkTask(ws,id);
+        if(!result.ready)process.exitCode=1;
+      } else if(operation==='verify') {
+        assert(text(options.check),'task verify requires --check <check-id>');
+        result=await tasks.verifyTask(ws,id,text(options.check));
+        if(result.status!=='PASS'||result.freshness==='STALE')process.exitCode=1;
+      } else if(operation==='record') {
+        assert(text(options.params),'task record requires --params <json>');
+        result=await tasks.recordTask(ws,id,JSON.parse(text(options.params)));
+      } else if(operation==='converge') {
+        result=await tasks.convergeTask(ws,id);
+        if(result.status!=='PASS')process.exitCode=1;
+      } else throw new Error('Use task init|check|verify|record|converge <id>');
+      print(result);
+    }
+    else if(command==='cancel')print(await cancel(ws,options._[1],{confirmEnded:options['confirm-ended']===true?text(options.reason,''):null}));
+    else if(command==='retro')print(await retro(ws,{since:text(options.since)}));
+    else if(command==='hooks') {
+      assert(options.install===true,'Use hooks --install');
+      print(await installHooks(ws));
+    }
+    else if(command==='wait') {
+      const minutes=Number(text(options['timeout-min'],'40'));
+      assert(minutes>0,'--timeout-min must be a positive number');
+      const waited=await waitForJobs(ws,options._.slice(1),{timeoutMs:minutes*60000});
+      print(waited);
+      process.exitCode=waited.timedOut?2:waited.jobs.every(job=>job.status==='COMPLETED')?0:1;
+    }
     else if(command==='obsidian')print(await obsidian(ws,options._[1],options.params?JSON.parse(options.params):{},{write:options.write===true}));
     else if(command==='modes') {
       const report=async()=>modeStatus(ws,await listJobs(ws));
@@ -164,6 +254,14 @@ State, evidence and credentials never belong in the public repository.`);
         print({acts:session.acts.length,state:await report()});
       } else console.log(panel(await report()));
     }
+    else if(command==='graph') {
+      const sub=options._[1];
+      if(sub==='build')print(await buildGraph(ws,{codeOnly:options['code-only']===true}));
+      else if(sub==='relink')print(await relinkGraph(ws));
+      else if(sub==='trace')print(await traceGraph(ws));
+      else if(sub==='status'||!sub){const st=await graphStatus(ws);print(st);if(st.status!=='CURRENT')process.exitCode=1;}
+      else process.stdout.write(await graphCommand(ws,options._.slice(1)));
+    }
     else if(command==='check-project') {
       const profile=await readJSON(path.join(ROOT,'profiles',`${ws.config.profile}.json`));
       const before=await snapshot(ws.project);
@@ -171,7 +269,7 @@ State, evidence and credentials never belong in the public repository.`);
       const dir=path.join(ws.state,'artifacts',`checks-${Date.now()}`);await fs.mkdir(dir,{recursive:true});
       for(const [i,check] of profile.checks.entries()) {
         const resolvedArgs=check.args.map(arg=>arg.replaceAll('{artifactDirectory}',dir));
-        try {const run=await runCommand(check.command,resolvedArgs,{cwd:ws.project,timeout:900000,maxBuffer:64*1024*1024});await fs.writeFile(path.join(dir,`${i}.log`),run.stdout+run.stderr);results.push({command:check,status:'PASS'});}
+        try {const exec=cwd=>runCommand(check.command,resolvedArgs,{cwd,timeout:900000,maxBuffer:64*1024*1024});const run=check.isolate?await withIsolatedCopy(ws.project,exec):await exec(ws.project);await fs.writeFile(path.join(dir,`${i}.log`),run.stdout+run.stderr);results.push({command:check,status:'PASS'});}
         catch(e){await fs.writeFile(path.join(dir,`${i}.log`),(e.stdout||'')+(e.stderr||''));results.push({command:check,status:'FAIL'});}
       }
       const after=await snapshot(ws.project);

@@ -21,7 +21,12 @@ than inferred from the currently focused application.
 | `approve TASK --reason …` | Issue a one-shot approval for one writing task |
 | `run PACKET [--wait]` | Submit a task; background by default, exact job ID returned |
 | `status [JOB]` | Read all job records or one exact job |
-| `cancel JOB` | Request cancellation; terminal state follows confirmed closure |
+| `status --summary` | Compact states; a failed or timed-out job names its `postmortem.json` |
+| `cancel JOB` | Request cancellation; terminal state follows confirmed closure. A job whose worker and provider child are both gone is closed as `orphaned`; a surviving child is named and left alone |
+| `wait [JOB …] [--timeout-min N]` | Block until the jobs (default: every active one) finish and print their verdicts, gaps and postmortems; exit 2 on timeout. Run it in the background to be woken when a review ends |
+| `retro [--since DATE]` | Journal retrospective: failure causes, per-model jobs, cost and input tokens, UNKNOWN share, unanswered criteria, slowest runs |
+| `hook NAME` | Claude Code hook entrypoints (`session-start`, `handoff`, `pre-run`, `report-ready`); read the event on stdin and never block. `report-ready` only notifies the person at Stop — Stop context would continue the conversation — and delivers finished reports with the next prompt (`UserPromptSubmit`), marking a report seen only when its whole block was delivered |
+| `hooks --install` | Merge the Claudex hooks into `.claude/settings.local.json` in exec form (no shell, so a path is never a command; the gate matches `Bash\|PowerShell`), replacing only earlier Claudex hooks and keeping every other hook, even one sharing an entry |
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
 | `check-project` | Execute the selected profile's commands in the managed project |
 | `modes [--status\|--debt\|--json]` | Show who answers for which roles and what re-check is owed |
@@ -136,13 +141,41 @@ worker keeps that text as `providerError` and classifies it into a next step:
 
 | Kind | What it means | What the job record suggests |
 |---|---|---|
-| `QUOTA` | the account is out of budget | open a recorded delegation of that provider's roles |
+| `QUOTA` | the account is out of budget (Codex: usage limit; Claude: session or weekly limit) | open a recorded delegation of that provider's roles |
 | `MODEL` | the installed CLI does not serve the requested model | change the assignment, or upgrade that CLI |
 | `AUTH` | the session is not authorised | the same delegation route, once you know it is not a login problem |
 | `EXECUTABLE` | the command did not start | run `doctor` |
 
 Classification suggests; it never opens a delegation. Who answers for a role stays a human
 decision, and a model the CLI cannot serve is a settings problem rather than an outage.
+
+## Partial answers and stopped runs
+
+A result that answers some criteria and omits others is kept: each omitted criterion becomes
+UNKNOWN with the reason, and the job records `resultGaps` (`missing`, and `unexpected` for
+invented criteria, which are dropped). A result with no criterion answered still fails.
+
+A stop (cancel, timeout, output overflow) is repeated every five seconds until the provider's
+process tree closes. Termination is confirmed only when the child closed and the last kill
+succeeded. After thirty seconds the worker stops waiting and records
+`termination.confirmed: false` with the process ID. Such a job keeps its claimed scope and
+blocks another writer in the same worktree. The harness sees only the direct child, and a
+detached helper can outlive it, so release is a recorded human statement: once the process is
+gone, `cancel JOB --confirm-ended --reason "<what you checked>"` confirms the tree ended and
+releases the scope. The postmortem is written before the terminal status, so whoever sees the status
+also finds the report.
+
+A job whose worker died is closed by `cancel` as `orphaned`; so is a queued job that no worker
+picked up within a minute (a worker records its process ID as soon as it starts). A process ID
+check cannot tell a reused ID from the original process; it errs towards leaving a job open.
+
+## Check runs handed to a reviewer
+
+A job bound to a task contract receives the latest automated run of each of the contract's
+checks, with the tail of its log, marked CURRENT only when it was taken on exactly the snapshot
+the job reviews. A log whose bytes no longer match its record is withheld. The job records what
+it was given as `checkEvidence`. A read-only sandbox that cannot run a check no longer turns
+every such criterion into UNKNOWN.
 
 ## Reports
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ROOT, assert, atomicJSON, contained, exists, git, readJSON, sha } from './io.mjs';
 import { ACCESS, CONFIG_VERSION, defaultConfig, resolveAssignment, validateConfig } from './config.mjs';
 
-export async function initWorkspace({ workspace, project, profile = 'generic', vault = null, url = 'https://github.com/ParkPavel/claudex', access = 'approval', assignments = {}, models = {}, executables = {} }) {
+export async function initWorkspace({ workspace, project, profile = 'generic', vault = null, obsidian = {}, url = 'https://github.com/ParkPavel/claudex', access = 'approval', assignments = {}, models = {}, executables = {} }) {
   const root = await fs.realpath(path.resolve(workspace));
   const target = await contained(root, path.resolve(root, project));
   assert(target !== root, 'The desktop root must contain the managed project, not be the project');
@@ -20,6 +20,8 @@ export async function initWorkspace({ workspace, project, profile = 'generic', v
   config.assignments = assignments;
   config.models = { ...config.models, ...models };
   config.executables = { ...config.executables, ...executables };
+  config.obsidian = { ...config.obsidian, ...obsidian };
+  if (vault) config.obsidian.vault = vault;
   validateConfig(config, await readJSON(path.join(ROOT, 'config/roles.json')));
   await atomicJSON(configPath, config);
   await atomicJSON(path.join(root, '.claudex.json'), { schemaVersion: 1, state: '.local/claudex' });
@@ -38,7 +40,7 @@ export async function syncWorkspace(ws) {
   const previous = await exists(manifestPath) ? await readJSON(manifestPath) : {};
   const files = {};
   const relHarness = path.relative(ws.root, ROOT).split(path.sep).join('/');
-  const pointer = `# Claudex workspace\n\nAgent configuration moved to [Claudex](${ws.config.repositoryUrl}).\nRead [the shared contract](${relHarness}/config/core.md) before work.\nManaged project: \`${ws.config.project}\`. Local context: \`.local/claudex/project-profile.md\` when present.\nRun \`node ${relHarness}/bin/claudex.mjs doctor\` to verify this workspace.\nUse \`node ${relHarness}/bin/claudex.mjs\` for jobs and Obsidian CLI evidence.\nLoad relevant skills from \`${relHarness}/skills\`; do not load the full library by default.\nThe contract, the selected profile and the skills for the task are what a job needs. \`${relHarness}/docs/\` explains the harness to people, and \`${relHarness}/docs/research/\` records dated observations; neither is required to do the work.\n`;
+  const pointer = `# Claudex workspace\n\nAgent configuration moved to [Claudex](${ws.config.repositoryUrl}).\nRead [the shared contract](${relHarness}/config/core.md) before work.\nManaged project: \`${ws.config.project}\`. Local context: \`.local/claudex/project-profile.md\` when present.\nRun \`node ${relHarness}/bin/claudex.mjs doctor\` to verify this workspace.\nUse \`node ${relHarness}/bin/claudex.mjs\` for jobs and Obsidian CLI evidence.\nLoad relevant skills from \`${relHarness}/skills\`; do not load the full library by default.\nThe contract, selected profile and task-relevant skills are the task context. \`${relHarness}/docs/\` is human documentation; do not read it as task context unless the task needs it.\n`;
   files['AGENTS.md'] = pointer;
   files['CLAUDE.md'] = pointer;
   files['.gitignore'] = '# This desktop is local storage. Publish each nested repository independently.\n*\n';
@@ -52,17 +54,19 @@ export async function syncWorkspace(ws) {
   for (const [name, role] of Object.entries(roles)) {
     const resolved = resolveAssignment(ws.config, name, role);
     const model = resolved.model ?? ws.config.models?.[resolved.provider] ?? null;
-    const text = `${role.purpose}\nRead ${path.join(ROOT, 'config/core.md').split(path.sep).join('/')} and the selected project profile. Use Claudex jobs for delegated work. Skill names: ${role.skills.join(', ')}.\n`;
+    const text = `${role.purpose}\nRead ${relHarness}/config/core.md (relative to the workspace root) and the selected project profile. Use Claudex jobs for delegated work. Skill names: ${role.skills.join(', ')}.\n`;
     if (resolved.provider === 'claude') files[`.claude/agents/${name}.md`] = `---\nname: ${name}\ndescription: ${JSON.stringify(role.purpose)}\n${model ? `model: ${model}\n` : ''}effort: ${resolved.effort}\ntools: Read, Glob, Grep${role.authority === 'workspace-write' ? ', Edit, Write' : ''}\n---\n${text}`;
     else files[`.codex/agents/${name}.toml`] = `name = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(role.purpose)}\nsandbox_mode = "read-only"\n${model ? `model = ${JSON.stringify(model)}\n` : ''}model_reasoning_effort = ${JSON.stringify(resolved.effort)}\ndeveloper_instructions = ${JSON.stringify(text)}\n`;
   }
   // Native discovery needs small SKILL.md files at each host's supported path.
   // They point to a single maintained body instead of copying that body twice.
+  // Paths are workspace-relative: an absolute one broke every stub when the
+  // workspace moved, and put a machine path into files a person may share.
   for (const skill of await fs.readdir(path.join(ROOT, 'skills'))) {
     const body = await fs.readFile(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
     const front = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     assert(front, `Missing frontmatter for ${skill}`);
-    const stub = `---\n${front[1]}\n---\nRead and follow the maintained skill at ${path.join(ROOT, 'skills', skill, 'SKILL.md').split(path.sep).join('/')} for this task.\n`;
+    const stub = `---\n${front[1]}\n---\nRead and follow the maintained skill at ${relHarness}/skills/${skill}/SKILL.md (relative to the workspace root) for this task.\n`;
     files[`.agents/skills/${skill}/SKILL.md`] = stub;
     files[`.claude/skills/${skill}/SKILL.md`] = stub;
   }

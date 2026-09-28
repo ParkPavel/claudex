@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ROOT, exists, git, readJSON } from './io.mjs';
+import { ROOT, exists, git, inside, readJSON } from './io.mjs';
+import { runCommand } from './process.mjs';
 import { ACCESS, MODEL_EXAMPLES, MODEL_PATTERN, PROVIDERS, EFFORTS, resolveAssignment } from './config.mjs';
 
 // The window a person meets when they install this harness on their own machine.
@@ -78,9 +79,13 @@ export async function projectProblem(root, candidate) {
   if (!candidate) return 'Name the folder of the project this harness will manage.';
   const target = path.resolve(root, candidate);
   if (path.resolve(target) === path.resolve(root)) return 'The workspace root cannot be the managed project; the project lives inside it.';
+  if (!inside(root, target)) return `${target} is outside the workspace. Choose a Git repository inside ${root}.`;
   if (!(await exists(target))) return `${target} does not exist. Create or clone the project first.`;
   const top = await git(target, ['rev-parse', '--show-toplevel']).then(value => value.trim(), () => null);
-  if (!top || path.resolve(top) !== path.resolve(target)) return `${target} is not a Git root. Claudex manages a repository, not a folder inside one.`;
+  // Compared as real paths: Git reports the long form, while a folder may be
+  // named through an 8.3 short name or a link (a Windows temp folder is one).
+  const real = async p => fs.realpath(p).catch(() => path.resolve(p));
+  if (!top || await real(top) !== await real(target)) return `${target} is not a Git root. Claudex manages a repository, not a folder inside one.`;
   return null;
 }
 
@@ -93,6 +98,103 @@ export async function chooseProject(io, root, current = null) {
     ...LAYOUT.map(item => `  ${item}`),
   ])}\n`);
   return ask(io, 'project folder', { fallback: current, validate: value => projectProblem(root, value) });
+}
+
+/**
+ * What this machine can run, shown before any question. A missing provider CLI
+ * or an old Node is found here instead of by the first job that fails; a model
+ * a CLI cannot serve is still only found by a run (doctor says so).
+ */
+export async function probeEnvironment(executables = {}) {
+  const version = async (command, args = ['--version']) => {
+    try { return { found: true, version: (await runCommand(command, args, { timeout: 15000 })).stdout.trim().split(/\r?\n/)[0] }; }
+    catch (error) { return { found: false, version: null, problem: error.code === 'ENOENT' || /not found|not recognized|Missing|Unsupported/i.test(error.message) ? 'not installed or not on PATH' : error.message.split('\n')[0] }; }
+  };
+  const major = Number(process.versions.node.split('.')[0]);
+  return [
+    { name: 'node', found: true, version: process.version, problem: major >= 22 ? null : 'Claudex needs Node.js 22 or newer' },
+    { name: 'git', ...(await version('git')) },
+    ...(await Promise.all(PROVIDERS.map(async provider => ({ name: provider, ...(await version(executables[provider] ?? provider)) })))),
+  ];
+}
+export function environmentFrame(rows) {
+  const missing = rows.filter(row => !row.found || row.problem);
+  return frame('Environment', [
+    ...rows.map(row => `${row.name.padEnd(8)} ${row.found ? row.version : '—'}${row.problem ? `  ! ${row.problem}` : ''}`),
+    '',
+    missing.length ? 'Roles of a missing provider cannot run until it is installed and logged in; you can continue and fix it later.' : 'Everything the harness launches was found. Logins and model access are checked by the first run.',
+  ]);
+}
+
+/** The profile a project looks like, offered as the default. A suggestion; the person chooses. */
+export async function detectProfile(projectPath) {
+  if (!projectPath) return 'generic';
+  const has = file => exists(path.join(projectPath, file));
+  if (await has('manifest.json') && await has('package.json')) {
+    const manifest = await readJSON(path.join(projectPath, 'manifest.json')).catch(() => ({}));
+    if (manifest.minAppVersion || manifest.isDesktopOnly !== undefined) return 'obsidian';
+  }
+  return 'generic';
+}
+
+/** Package scripts that look like checks, in the order a person would run them. */
+export async function suggestedChecks(projectPath) {
+  const pkg = projectPath ? await readJSON(path.join(projectPath, 'package.json')).catch(() => null) : null;
+  const scripts = Object.keys(pkg?.scripts ?? {});
+  return ['build', 'test', 'lint', 'check', 'typecheck', 'svelte-check'].filter(name => scripts.includes(name)).map(name => (name === 'test' ? 'npm test' : `npm run ${name}`));
+}
+
+// Decisions an agent cannot take for the person and must not infer from a relay.
+// A subagent told "the user agreed" has received a relay, not consent, and a
+// ticket that waits for such consent inside a pipeline can never be resolved.
+// Recording them once, where every role reads them, makes them durable.
+export const PRINCIPLES_START = '<!-- claudex:principles:start -->';
+export const PRINCIPLES_END = '<!-- claudex:principles:end -->';
+export function principlesSection(p, date = new Date().toISOString().slice(0, 10)) {
+  return [
+    PRINCIPLES_START,
+    `## Working principles (recorded by claudex setup, ${date})`,
+    '',
+    `- Answer the person in: ${p.language}.`,
+    `- Protected branch: ${p.branch}. Changes reach it only through a pull request; never push to it directly.`,
+    p.merge === 'person'
+      ? "- Merging is the person's act: agents prepare the pull request and stop."
+      : '- An agent may merge a pull request whose required checks are green and whose review is recorded.',
+    `- Checks before claiming completion: ${p.checks || 'the project states none; ask before inventing one'}.`,
+    '- A decision the person made is recorded here or in the task contract before a pipeline runs. A relayed "the user agreed" is not consent; an unresolved decision skips its ticket instead of stopping the queue.',
+    PRINCIPLES_END,
+  ].join('\n');
+}
+export function readPrinciples(text) {
+  const start = text?.indexOf(PRINCIPLES_START) ?? -1;
+  const end = text?.indexOf(PRINCIPLES_END) ?? -1;
+  if (start < 0 || end < start) return null;
+  const block = text.slice(start, end);
+  const pick = pattern => block.match(pattern)?.[1]?.trim() ?? null;
+  return {
+    language: pick(/Answer the person in: (.+?)\.\n/),
+    branch: pick(/Protected branch: (\S+?)\. /),
+    merge: /Merging is the person/.test(block) ? 'person' : 'agent',
+    checks: pick(/Checks before claiming completion: (.+?)\.\n/),
+  };
+}
+/** Replaces an earlier recorded section and keeps everything the person wrote around it. */
+export function mergePrinciples(text, section) {
+  const current = text ?? '';
+  const start = current.indexOf(PRINCIPLES_START);
+  const end = current.indexOf(PRINCIPLES_END);
+  if (start >= 0 && end > start) return `${current.slice(0, start)}${section}${current.slice(end + PRINCIPLES_END.length)}`;
+  return `${current.trimEnd()}${current.trim() ? '\n\n' : ''}${section}\n`;
+}
+export async function choosePrinciples(io, { current = null, checks = [] } = {}) {
+  io.write(`${frame('Working principles', [
+    'Decisions every role reads before it acts, so nobody has to relay them. They are written into the local project profile; run setup again to change them.',
+  ])}\n`);
+  const language = await ask(io, 'language to answer you in', { fallback: current?.language ?? 'English' });
+  const branch = await ask(io, 'protected branch', { fallback: current?.branch ?? 'main', validate: value => (/^[\w./-]+$/.test(value) ? null : 'A branch name.') });
+  const merge = await ask(io, 'who merges pull requests (person/agent)', { fallback: current?.merge ?? 'person', choices: ['person', 'agent'] });
+  const checks_ = await ask(io, 'checks before claiming completion (comma-separated)', { fallback: current?.checks ?? (checks.join(', ') || null) });
+  return { language, branch, merge, checks: checks_ };
 }
 
 export async function chooseProfile(io, current = 'generic') {
@@ -133,6 +235,29 @@ export async function chooseProviders(io, current = {}) {
     models[provider] = model || null;
   }
   return { executables, models };
+}
+
+export async function chooseObsidian(io, current = {}) {
+  io.write(`${frame('Obsidian test vault', [
+    'Live checks need an explicit vault identity and absolute local path. Mutations are allowed only when you mark this as a test vault; production vaults stay read-only.',
+  ])}\n`);
+  const executable = await ask(io, 'obsidian executable', { fallback: current.executables?.obsidian ?? 'obsidian' });
+  const vault = await ask(io, 'vault name', {
+    fallback: current.obsidian?.vault ?? null,
+    validate: value => (value && !/[\r\n\0]/.test(value) ? null : 'Name the Obsidian vault exactly as the CLI knows it.'),
+  });
+  const vaultPath = await ask(io, 'absolute vault path', {
+    fallback: current.obsidian?.vaultPath ?? null,
+    validate: async value => {
+      if (!path.isAbsolute(value)) return 'Use an absolute path to the local vault.';
+      if (!(await exists(value))) return `${value} does not exist.`;
+      return null;
+    },
+  });
+  const testVault = await ask(io, 'allow test mutations in this vault? (yes/no)', {
+    fallback: current.obsidian?.testVault ? 'yes' : 'no', choices: ['yes', 'no'],
+  });
+  return { executable, config: { vault, vaultPath: path.resolve(vaultPath), testVault: testVault === 'yes' } };
 }
 
 /**
@@ -197,21 +322,37 @@ export function summary(choices) {
     `profile    ${choices.profile}`,
     `access     ${choices.access} — ${ACCESS_TEXT[choices.access]}`,
     ...PROVIDERS.map(provider => `${provider.padEnd(10)} ${choices.executables?.[provider] ?? provider}${choices.models?.[provider] ? ` · ${choices.models[provider]}` : ''}`),
+    ...(choices.profile === 'obsidian' ? [
+      `obsidian   ${choices.executables.obsidian}`,
+      `vault      ${choices.obsidian.vault} · ${choices.obsidian.vaultPath}${choices.obsidian.testVault ? ' · test mutations allowed' : ' · read-only'}`,
+    ] : []),
+    ...(choices.principles ? [`principles ${choices.principles.language} · branch ${choices.principles.branch} · merge by ${choices.principles.merge} · checks: ${choices.principles.checks || 'none'}`] : []),
+    ...(choices.hooks !== undefined ? [`hooks      ${choices.hooks ? 'install into .claude/settings.local.json' : 'not installed'}`] : []),
     assigned.length ? 'roles' : 'roles      every role keeps its default',
     ...assigned.map(([name, assignment]) => `  ${name}: ${Object.entries(assignment).map(([key, value]) => `${key}=${value}`).join(' ')}`),
   ]);
 }
 
 /** The whole conversation, for a new installation or for changing an existing one. */
-export async function runSetup(io, { root, roles, config = null, project = null } = {}) {
+export async function runSetup(io, { root, roles, config = null, project = null, probe = probeEnvironment, profileText = null } = {}) {
   const table = roles ?? await readJSON(path.join(ROOT, 'config/roles.json'));
-  const choices = {
-    project: config ? config.project : await chooseProject(io, root, project),
-    profile: await chooseProfile(io, config?.profile ?? 'generic'),
-    access: await chooseAccess(io, config?.access ?? 'approval'),
-  };
+  io.write(`${environmentFrame(await probe(config?.executables ?? {}))}\n`);
+  const choices = { project: config ? config.project : await chooseProject(io, root, project) };
+  const projectPath = path.resolve(root, choices.project);
+  choices.profile = await chooseProfile(io, config?.profile ?? await detectProfile(projectPath));
+  choices.access = await chooseAccess(io, config?.access ?? 'approval');
   Object.assign(choices, await chooseProviders(io, config ?? {}));
+  if (choices.profile === 'obsidian') {
+    const obsidian = await chooseObsidian(io, config ?? {});
+    choices.executables.obsidian = obsidian.executable;
+    choices.obsidian = obsidian.config;
+  }
   choices.assignments = await chooseAssignments(io, { roles: table, config: config ?? { assignments: {} }, current: config?.assignments ?? {} });
+  choices.principles = await choosePrinciples(io, { current: readPrinciples(profileText), checks: await suggestedChecks(projectPath) });
+  io.write(`${frame('Claude Code hooks', [
+    'Four hooks carry state between sessions: the handover at session start, a handoff line at each stop, finished job reports in the next turn, and a gate that refuses an unready writing job before it is submitted. They go into .claude/settings.local.json beside what is already there; the generated settings.json is left alone.',
+  ])}\n`);
+  choices.hooks = (await ask(io, 'install the hooks? (yes/no)', { fallback: 'yes', choices: ['yes', 'no'] })) === 'yes';
   io.write(`${summary(choices)}\n`);
   const confirmed = await ask(io, 'write this configuration? (yes/no)', { fallback: 'yes', choices: ['yes', 'no'] });
   return confirmed === 'yes' ? choices : null;

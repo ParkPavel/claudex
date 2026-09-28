@@ -48,3 +48,16 @@ depth; server rules and account permissions remain necessary enforcement boundar
 Resume an exact task and snapshot from its journal. Never resume the newest conversation
 merely because it is newest. A worker without a confirmed ready event is still starting.
 Do not replace a worker until its previous process is confirmed terminated.
+
+For a feature, behavioral fix or multi-file maintenance task, use the spec-workflow skill:
+one local contract binds intent, exclusions, criteria, scoped tasks and checks. Validate it
+before implementation and converge after verification. Ordinary answers and cosmetic edits
+do not need a contract. Preserve UNKNOWN for missing host or persistence evidence. A recorded
+manual observation is an attestation; it does not become an automated or independent proof.
+
+Choose the least costly configured model that can handle a bounded assignment. Prefer a
+small routine task on Haiku, normal implementation on Sonnet, and reserve stronger models
+for complex decisions and review. Pass exact paths and relevant evidence, not whole sessions.
+Use status --summary for polling. A five-hour subscription window is not a known token budget;
+record provider usage when available and stop retrying on quota errors. Graph indexes are
+optional, snapshot-bound navigation: validate inferred links in source before relying on them.

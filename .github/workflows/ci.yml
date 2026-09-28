@@ -24,3 +24,4 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: node bin/claudex.mjs scan --repo . --history
+      - run: npm run release:archive
