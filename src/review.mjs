@@ -48,7 +48,9 @@ async function diffSince(repo, base, paths) {
   if (body.length <= DIFF_LIMIT) return { text: body, chars: body.length, truncated: false, files: tracked.length + untracked.length, untracked: untracked.length };
   // Cut: every changed name survives (up to a bounded list), and the whole stays under the cap.
   const names = [...tracked.map(f => `M ${f}`), ...untracked.map(f => `? ${f}`)];
-  const list = `Changed files (${names.length}; M tracked, ? untracked):\n${names.slice(0, LIST_LIMIT).join('\n')}${names.length > LIST_LIMIT ? `\n… ${names.length - LIST_LIMIT} more` : ''}`;
+  let list = `Changed files (${names.length}; M tracked, ? untracked):\n${names.slice(0, LIST_LIMIT).join('\n')}${names.length > LIST_LIMIT ? `\n… ${names.length - LIST_LIMIT} more; list them with git diff --name-only and git ls-files --others` : ''}`;
+  // The list itself is bounded too: never more than half the cap, so the whole stays under it.
+  if (list.length > DIFF_LIMIT / 2) list = `${list.slice(0, DIFF_LIMIT / 2)}\n… file list cut`;
   const note = `\n… diff cut at ${DIFF_LIMIT} characters; open the listed files the cut part covers.`;
   const room = Math.max(0, DIFF_LIMIT - list.length - note.length - 2);
   const text = `${list}\n\n${body.slice(0, room)}${note}`;
@@ -71,6 +73,7 @@ export async function previousReview(ws, packet, jobFile, repo = null) {
   assert(prior, `recheckOf names no job: ${packet.recheckOf}`);
   assert(prior.status === 'COMPLETED', `recheckOf must name a completed job; ${packet.recheckOf} is ${prior.status}`);
   assert(prior.packet?.authority === 'read-only', 'recheckOf must name a review (a read-only job)');
+  assert(prior.packet?.role === packet.role, `A re-check is answered by the role that reviewed: ${prior.packet?.role}`);
   const here = packet.worktree ? path.resolve(ws.root, packet.worktree) : ws.project;
   const there = prior.packet?.worktree ? path.resolve(ws.root, prior.packet.worktree) : ws.project;
   assert(samePath(here, there), 'A re-check reviews the same checkout as the review it answers');
@@ -79,9 +82,11 @@ export async function previousReview(ws, packet, jobFile, repo = null) {
   const result = prior.artifactDirectory ? await readJSON(path.join(prior.artifactDirectory, 'result.json')).catch(() => null) : null;
   assert(result, `The previous review's result is missing; re-review instead of re-checking`);
   const owed = (result.criteria ?? []).filter(c => c.status !== 'PASS').map(c => c.id);
-  const carried = new Set((packet.criteria ?? []).map(c => c.id));
-  const dropped = owed.filter(id => !carried.has(id));
-  assert(!dropped.length, `A re-check must carry every criterion the previous review did not pass: ${dropped.join(', ')}`);
+  // Carried with the same wording: a softened criterion is a dropped one.
+  const carried = new Map((packet.criteria ?? []).map(c => [c.id, c.text]));
+  const before = new Map((prior.packet?.criteria ?? []).map(c => [c.id, c.text]));
+  const dropped = owed.filter(id => !carried.has(id) || (before.has(id) && carried.get(id) !== before.get(id)));
+  assert(!dropped.length, `A re-check must carry every criterion the previous review did not pass, unchanged: ${dropped.join(', ')}`);
   if (repo) {
     // A path recreated or switched to unrelated history is another checkout.
     await git(repo, ['merge-base', '--is-ancestor', prior.before.head, 'HEAD']).catch(() => { throw new Error('The previous review started from a commit that is not in this checkout\'s history'); });

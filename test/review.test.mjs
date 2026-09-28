@@ -125,6 +125,19 @@ test('packets: a re-check is read-only, and a budget is a bounded step count',as
   await assert.rejects(validatePacket({...reviewer,base:'HEAD',budget:{toolCalls:0}}),/budget is/);
   await assert.rejects(validatePacket({...reviewer,base:'HEAD',budget:{toolCalls:5,tokens:9}}),/budget is/);
   await validatePacket({...reviewer,base:'HEAD',recheckOf:'first',budget:{toolCalls:25}});
+  await assert.rejects(validatePacket({...reviewer,base:'HEAD',paths:[]}),/names the paths it covers/);
+  await assert.rejects(validatePacket({...reviewer,mode:'snapshot',paths:[],recheckOf:'first'}),/names the paths it covers/);
+});
+
+test('a re-check keeps the reviewing role and the exact wording of what it owes',async t=>{
+  const {ws,repo,base}=await fixture(t);
+  const dir=path.join(ws.state,'artifacts','owed');
+  await fs.mkdir(dir,{recursive:true});
+  await atomicJSON(path.join(dir,'result.json'),{criteria:[{id:'sum',status:'UNKNOWN',evidence:[]}],findings:[],unknowns:[]});
+  await atomicJSON(jobFile(ws,'owed'),{id:'owed',status:'COMPLETED',packet:reviewer,before:{head:base},artifactDirectory:dir});
+  await assert.rejects(reviewContext(ws,repo,{...reviewer,role:'tester',recheckOf:'owed'},{base},{jobFile}),/role that reviewed: auditor/);
+  await assert.rejects(reviewContext(ws,repo,{...reviewer,criteria:[{id:'sum',text:'sum mostly adds'}],recheckOf:'owed'},{base},{jobFile}),/unchanged: sum/);
+  assert.equal((await reviewContext(ws,repo,{...reviewer,recheckOf:'owed'},{base},{jobFile})).meta.recheckOf,'owed');
 });
 
 test('tool steps are counted from both providers\' event streams',()=>{
