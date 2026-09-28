@@ -11,7 +11,7 @@ const git=(repo,...args)=>execFileSync('git',['-C',repo,...args],{encoding:'utf8
 // A repository and the Graphify graph for it, as graphify extract would leave it:
 // AST nodes for code, one node per document, no document -> code edges.
 async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-graph-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-graph-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const project=path.join(root,'project'),state=path.join(root,'.local','claudex');
   await fs.mkdir(path.join(project,'src'),{recursive:true});

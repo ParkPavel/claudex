@@ -82,7 +82,10 @@ export async function projectProblem(root, candidate) {
   if (!inside(root, target)) return `${target} is outside the workspace. Choose a Git repository inside ${root}.`;
   if (!(await exists(target))) return `${target} does not exist. Create or clone the project first.`;
   const top = await git(target, ['rev-parse', '--show-toplevel']).then(value => value.trim(), () => null);
-  if (!top || path.resolve(top) !== path.resolve(target)) return `${target} is not a Git root. Claudex manages a repository, not a folder inside one.`;
+  // Compared as real paths: Git reports the long form, while a folder may be
+  // named through an 8.3 short name or a link (a Windows temp folder is one).
+  const real = async p => fs.realpath(p).catch(() => path.resolve(p));
+  if (!top || await real(top) !== await real(target)) return `${target} is not a Git root. Claudex manages a repository, not a folder inside one.`;
   return null;
 }
 

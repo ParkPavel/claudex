@@ -8,7 +8,7 @@ import { detectProfile, mergePrinciples, principlesSection, readPrinciples, runS
 
 const git=(repo,...args)=>execFileSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true});
 async function workspace(t,{manifest=true}={}) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-setup-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-setup-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const project=path.join(root,'plugin');
   await fs.mkdir(project);
@@ -20,7 +20,8 @@ async function workspace(t,{manifest=true}={}) {
 // Answers in order; an empty answer takes the default the window offers.
 function scripted(answers) {
   const asked=[],out=[];
-  return {asked,out,io:{write:text=>out.push(text),question:async prompt=>{asked.push(prompt);return answers.length?answers.shift():'';}}};
+  // Running out of answers fails the test instead of re-asking forever.
+  return {asked,out,io:{write:text=>out.push(text),question:async prompt=>{asked.push(prompt);if(!answers.length)throw new Error(`Script ran out of answers at: ${prompt}`);return answers.shift();}}};
 }
 const probe=async()=>[{name:'node',found:true,version:'v22.0.0',problem:null},{name:'codex',found:false,version:null,problem:'not installed or not on PATH'}];
 

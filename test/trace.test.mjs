@@ -12,7 +12,7 @@ const git=(repo,...args)=>execFileSync('git',['-C',repo,...args],{encoding:'utf8
 // esbuild.config.mjs. The stub records the options it was given and returns a
 // metafile only when asked for one, as the real API does.
 async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-trace-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-trace-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const project=path.join(root,'project');
   await fs.mkdir(path.join(project,'node_modules','esbuild'),{recursive:true});

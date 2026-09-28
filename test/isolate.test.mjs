@@ -11,7 +11,7 @@ const git=(repo,...args)=>execFileSync('git',['-C',repo,...args],{encoding:'utf8
 // A project whose build rewrites a tracked bundle and reads a dependency from an
 // ignored node_modules, the way an Obsidian plugin's esbuild step does.
 async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-isolate-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-isolate-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const project=path.join(root,'project'),state=path.join(root,'.local','claudex');
   await fs.mkdir(path.join(project,'node_modules','dep'),{recursive:true});
@@ -120,7 +120,7 @@ test('eol:ignore compares text content across a CRLF checkout, and says so',asyn
 
 test('a reproduction target cannot leave its root through a link',async t=>{
   const {ws,contract,file,root}=await fixture(t);
-  const outside=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-outside-'));
+  const outside=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-outside-')));
   t.after(()=>fs.rm(outside,{recursive:true,force:true}));
   await fs.writeFile(path.join(outside,'main.js'),'built from source-v1\n');
   await fs.symlink(outside,path.join(root,'link'),process.platform==='win32'?'junction':'dir');

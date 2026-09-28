@@ -10,7 +10,7 @@ import { atomicJSON, readJSON } from '../src/io.mjs';
 import { claim, readClaims } from '../src/claims.mjs';
 
 async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-jobs-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-jobs-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const state=path.join(root,'.local','claudex');
   await fs.mkdir(path.join(state,'jobs'),{recursive:true});

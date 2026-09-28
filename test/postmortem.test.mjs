@@ -8,7 +8,7 @@ import { buildPostmortem, runWorker, submit } from '../src/jobs.mjs';
 
 const git=(repo,...args)=>execFileSync('git',['-C',repo,...args],{encoding:'utf8',windowsHide:true});
 async function fixture(t) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-postmortem-test-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'claudex-postmortem-test-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const project=path.join(root,'project'),state=path.join(root,'.local','claudex');
   await fs.mkdir(project,{recursive:true});

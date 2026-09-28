@@ -151,8 +151,10 @@ test('the Obsidian profile collects the live vault boundary in the same window',
  assert.equal(choices.executables.obsidian,'obsidian');
  assert.deepEqual(choices.obsidian,{vault:'OBStests',vaultPath,testVault:true});
  assert.match(written.join(''),/production vaults stay read-only/);
- assert.match(summary(choices),/OBStests/);
- assert.match(summary(choices),/mutations allowed/);
+ // The frame wraps at a width that depends on the temp path; read it as one line.
+ const flat=summary(choices).replace(/[│\s]+/g,' ');
+ assert.match(flat,/OBStests/);
+ assert.match(flat,/mutations allowed/);
 });
 
 test('an Obsidian vault path must be absolute and exist',async t=>{
