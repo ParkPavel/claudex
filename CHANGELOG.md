@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Lessons from 202 jobs of a working journal: Claude's session and weekly limits are
+  classified as QUOTA and a provider's refusal is kept as its own sentence; a result that omits
+  criteria is kept with those criteria UNKNOWN (`resultGaps`); a stop is retried and, when the
+  process tree does not close within thirty seconds, recorded as unconfirmed instead of hanging;
+  `cancel` closes a job whose worker died; `wait` replaces a hand-written watcher.
+- A reviewer bound to a task contract receives the coordinator's CURRENT check runs.
+- The setup window opens with the environment it found, offers the profile the project looks
+  like and its check-like scripts, records working principles into the local project profile,
+  installs the hooks and ends with `doctor`. Hooks are `claudex hook <name>`; `hooks --install`
+  merges them into `.claude/settings.local.json`. Generated stubs use workspace-relative paths.
+- `task check` warns where a valid contract promises what no check will show (after Spec
+  Kit's analyze): vague or duplicate criteria, placeholders, uncovered criteria, code without a
+  type checker or linter, checks the recorded principles require.
+- `retro` summarises the journal (after prompt-agent's session scoring).
+- `library/` keeps reference skills (Emil Kowalski's, MIT; a distilled Apple HIG, local
+  reference only), and the `native-ui-quality` skill routes UI work into it. Own skills carry
+  the journal's lessons (every failing suite's reason, assess/fix/re-test, environment first).
+
 - `task init|check|verify|record|converge` bind a feature or fix to a local contract and
   report PASS, FAIL or UNKNOWN per criterion against current, snapshot-bound evidence.
   `workflow.requireContract` makes writing jobs name their contract.
