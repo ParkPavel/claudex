@@ -96,8 +96,12 @@ test('an unconfirmed stop keeps its scope until cancel confirms the process ende
   await assert.rejects(cancel(ws,id),new RegExp(`Provider process ${process.pid} of stopped still runs`));
   const job=await readJSON(jobFile(ws,id));
   await atomicJSON(jobFile(ws,id),{...job,termination:{...job.termination,pid:deadPid()}});
-  assert.equal((await cancel(ws,id)).terminationConfirmed,true);
-  assert.equal((await readJSON(jobFile(ws,id))).termination.confirmed,true);
+  // The direct child being gone is not the tree being gone: a person records it.
+  await assert.rejects(cancel(ws,id),/--confirm-ended --reason/);
+  assert.ok(JSON.stringify(await readClaims(ws)).includes(id),'scope still held');
+  assert.equal((await cancel(ws,id,{confirmEnded:'Task Manager shows no codex or node children'})).terminationConfirmed,true);
+  const confirmed=(await readJSON(jobFile(ws,id))).termination;
+  assert.deepEqual([confirmed.confirmed,confirmed.confirmedBy,confirmed.reason],[true,'person','Task Manager shows no codex or node children']);
   assert.ok(!JSON.stringify(await readClaims(ws)).includes(id));
 });
 

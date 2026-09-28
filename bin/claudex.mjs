@@ -58,6 +58,7 @@ claims [--release <id>]                Show or release declared work scopes
 approve <task-id> --reason <text>      Issue a one-shot approval for one writing task
 run <packet.json> [--wait]             Submit a versioned provider job
 status [job-id] | cancel <job-id>      Inspect/cancel the exact job; cancel closes a job whose worker died
+cancel <job-id> --confirm-ended --reason <text>  Record that a stopped provider's process tree is gone
 wait [job-id ...] [--timeout-min <n>]  Block until the jobs (default: every active one) finish; exit 2 on timeout
 status --summary                     Compact job states without packets/transcripts
 task init <id> --goal <text> [--kind feature|bug|maintenance] [--worktree <path>]
@@ -224,7 +225,7 @@ State, evidence and credentials never belong in the public repository.`);
       } else throw new Error('Use task init|check|verify|record|converge <id>');
       print(result);
     }
-    else if(command==='cancel')print(await cancel(ws,options._[1]));
+    else if(command==='cancel')print(await cancel(ws,options._[1],{confirmEnded:options['confirm-ended']===true?text(options.reason,''):null}));
     else if(command==='retro')print(await retro(ws,{since:text(options.since)}));
     else if(command==='hooks') {
       assert(options.install===true,'Use hooks --install');

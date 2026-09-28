@@ -135,7 +135,7 @@ const PLACEHOLDER=/\b(TODO|TBD|FIXME|TKTK)\b|\?\?\?/;
 const CODE_PATH=/\.(?:[cm]?[jt]sx?|svelte|vue|swift|kt|py|rs|go)$|^(?:[^.]*\/)?(?:src|lib|app|tests?|__tests__)(?:\/[^.]*)?$/;
 // Contracts often call the tool a script wraps (node node_modules/eslint/...).
 const SCRIPT_ALIASES={test:/\btest\b|jest|vitest|mocha|--test/,build:/\bbuild\b|esbuild|vite build|webpack|rollup/,lint:/\blint\b|eslint/};
-const STATIC_CHECK=/lint|\btsc\b|typecheck|type-check|svelte-check|swiftlint|mypy|clippy/i;
+const STATIC_CHECK=/lint|\btsc\b|typecheck|type-check|svelte-check|swiftlint|mypy|clippy|\bcargo check\b|\bgo vet\b/i;
 export function analyzeContract(c,{principles=null}={}) {
   const warnings=[];
   const warn=(category,severity,summary)=>warnings.push({id:`${category[0].toUpperCase()}${warnings.filter(w=>w.category===category).length+1}`,category,severity,summary});

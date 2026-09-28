@@ -75,7 +75,39 @@ test('hooks run without a shell, so a path is never a command',()=>{
   }
 });
 
-test('reports that do not fit wait for the next stop instead of being lost',async t=>{
+test('at Stop the person gets a notice and nothing continues the conversation',async t=>{
+  const ws=await fixture(t);
+  const now=Date.parse('2026-09-28T12:00:00Z');
+  await atomicJSON(jobFile(ws,'j1'),{id:'j1',taskId:'t1',status:'FAILED',updated:'2026-09-28T11:00:00Z',error:'x'});
+  const atStop=await reportReady(ws,{now,event:'Stop'});
+  assert.match(atStop.systemMessage,/1 job report\(s\) ready/);
+  assert.equal(atStop.hookSpecificOutput,undefined,'Stop additionalContext would continue the conversation');
+  assert.equal(atStop.decision,undefined);
+  const delivered=await reportReady(ws,{now});
+  assert.equal(delivered.hookSpecificOutput.hookEventName,'UserPromptSubmit');
+  assert.match(delivered.hookSpecificOutput.additionalContext,/t1 -> FAILED/);
+  assert.equal(await reportReady(ws,{now,event:'Stop'}),null);
+});
+
+test('a report is marked seen only when its whole block was delivered',async t=>{
+  const ws=await fixture(t);
+  const now=Date.parse('2026-09-28T12:00:00Z');
+  // Four 200-character findings make each block about 900 characters.
+  for(let i=1;i<=3;i++) {
+    const dir=path.join(ws.state,'artifacts','L'+i);
+    await fs.mkdir(dir,{recursive:true});
+    await atomicJSON(path.join(dir,'result.json'),{criteria:[{id:'a',status:'FAIL'}],findings:Array.from({length:4},()=>'f'.repeat(220)),unknowns:[]});
+    await atomicJSON(jobFile(ws,'L'+i),{id:'L'+i,taskId:'long'+i,status:'COMPLETED',updated:'2026-09-28T11:0'+i+':00Z',artifactDirectory:dir});
+  }
+  const first=(await reportReady(ws,{now})).hookSpecificOutput.additionalContext;
+  assert.ok(first.length<=2000,String(first.length));
+  const shown=(first.match(/long\d -> COMPLETED/g)??[]).length;
+  assert.ok(shown>=1&&shown<3);
+  const rest=(await reportReady(ws,{now})).hookSpecificOutput.additionalContext;
+  assert.match(rest,new RegExp(`long${shown+1} -> COMPLETED`));
+});
+
+test('reports that do not fit wait for the next prompt instead of being lost',async t=>{
   const ws=await fixture(t);
   const now=Date.parse('2026-09-28T12:00:00Z');
   for(let i=1;i<=5;i++)await atomicJSON(jobFile(ws,'j'+i),{id:'j'+i,taskId:'t'+i,status:'FAILED',updated:'2026-09-28T11:0'+i+':00Z',error:'x'});

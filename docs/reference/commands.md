@@ -25,7 +25,7 @@ than inferred from the currently focused application.
 | `cancel JOB` | Request cancellation; terminal state follows confirmed closure. A job whose worker and provider child are both gone is closed as `orphaned`; a surviving child is named and left alone |
 | `wait [JOB …] [--timeout-min N]` | Block until the jobs (default: every active one) finish and print their verdicts, gaps and postmortems; exit 2 on timeout. Run it in the background to be woken when a review ends |
 | `retro [--since DATE]` | Journal retrospective: failure causes, per-model jobs, cost and input tokens, UNKNOWN share, unanswered criteria, slowest runs |
-| `hook NAME` | Claude Code hook entrypoints (`session-start`, `handoff`, `pre-run`, `report-ready`); read the event on stdin and never block |
+| `hook NAME` | Claude Code hook entrypoints (`session-start`, `handoff`, `pre-run`, `report-ready`); read the event on stdin and never block. `report-ready` only notifies the person at Stop — Stop context would continue the conversation — and delivers finished reports with the next prompt (`UserPromptSubmit`), marking a report seen only when its whole block was delivered |
 | `hooks --install` | Merge the Claudex hooks into `.claude/settings.local.json` in exec form (no shell, so a path is never a command; the gate matches `Bash\|PowerShell`), replacing only earlier Claudex hooks and keeping every other hook, even one sharing an entry |
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
 | `check-project` | Execute the selected profile's commands in the managed project |
@@ -159,8 +159,10 @@ A stop (cancel, timeout, output overflow) is repeated every five seconds until t
 process tree closes. Termination is confirmed only when the child closed and the last kill
 succeeded. After thirty seconds the worker stops waiting and records
 `termination.confirmed: false` with the process ID. Such a job keeps its claimed scope and
-blocks another writer in the same worktree until `cancel JOB` finds the process gone and
-confirms it. The postmortem is written before the terminal status, so whoever sees the status
+blocks another writer in the same worktree. The harness sees only the direct child, and a
+detached helper can outlive it, so release is a recorded human statement: once the process is
+gone, `cancel JOB --confirm-ended --reason "<what you checked>"` confirms the tree ended and
+releases the scope. The postmortem is written before the terminal status, so whoever sees the status
 also finds the report.
 
 A job whose worker died is closed by `cancel` as `orphaned`; so is a queued job that no worker

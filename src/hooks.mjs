@@ -130,11 +130,22 @@ function summarise(job, result, postmortem) {
 }
 
 /**
- * Stop: a finished job's verdict is carried into the next turn once. It never
- * blocks stopping (a hook that forces a turn can loop) and stays silent when
- * nothing new finished; old backlog is history, not news.
+ * A finished job's verdict reaches the model once, with the person's next
+ * prompt. Stop's additionalContext would not wait for that: per the hooks
+ * reference it continues the conversation (up to eight times), buying model
+ * turns nobody asked for. So at Stop the person only sees a notice, nothing is
+ * marked seen, and UserPromptSubmit carries the reports as context. Backlog
+ * older than six hours is history, not news, and is marked seen silently.
  */
-export async function reportReady(ws, { now = Date.now() } = {}) {
+export async function reportReady(ws, { now = Date.now(), event = 'UserPromptSubmit' } = {}) {
+  if (event === 'Stop') {
+    const seen = new Set(await quiet(() => readJSON(seenFile(ws))) ?? []);
+    const waiting = (await listJobs(ws)).filter(job => TERMINAL.has(job.status) && !seen.has(job.id) && !(now - Date.parse(job.updated ?? job.created ?? 0) > FRESH_MS));
+    return waiting.length ? { systemMessage:`Claudex: ${waiting.length} job report(s) ready; they reach Claude with your next message.`, suppressOutput:true } : null;
+  }
+  return deliverReports(ws, now);
+}
+async function deliverReports(ws, now) {
   const seen = new Set(await quiet(() => readJSON(seenFile(ws))) ?? []);
   const ready = [];
   for (const job of (await listJobs(ws)).sort((a,b) => String(a.updated ?? '').localeCompare(String(b.updated ?? '')))) {
@@ -144,30 +155,34 @@ export async function reportReady(ws, { now = Date.now() } = {}) {
     if (Number.isFinite(finished) && now - finished > FRESH_MS) { seen.add(job.id); continue; }
     ready.push(job);
   }
-  // Oldest first, a few per stop: a report that does not fit waits for the next
-  // stop instead of being marked seen unshown.
-  const shown = ready.slice(0,MAX_REPORTS);
+  // Oldest first, as many as fit: a report is marked seen only when its whole
+  // block is in the delivered text; the rest wait for the next prompt. A single
+  // block longer than the limit is cut, says so, and still counts as delivered.
   const blocks = [];
-  for (const job of shown) {
-    seen.add(job.id);
+  let used = 0;
+  for (const job of ready.slice(0,MAX_REPORTS)) {
     const dir = job.artifactDirectory ?? path.join(ws.state,'artifacts',job.id);
     const result = await quiet(() => readJSON(path.join(dir,'result.json')));
     const postmortem = await quiet(() => readJSON(path.join(dir,'postmortem.json')));
-    blocks.push(`${job.taskId} -> ${job.status}\n${summarise(job,result,postmortem)}\n  full result: ${path.join(dir,'result.json')}`);
+    let block = `${job.taskId} -> ${job.status}\n${summarise(job,result,postmortem)}\n  full result: ${path.join(dir,'result.json')}`;
+    if (!blocks.length && block.length > MAX_CONTEXT - 200) block = `${block.slice(0,MAX_CONTEXT - 260)}\n  … cut; read the full result`;
+    if (used + block.length > MAX_CONTEXT - 200) break;
+    blocks.push(block);
+    used += block.length + 1;
+    seen.add(job.id);
   }
   await fs.mkdir(path.dirname(seenFile(ws)),{recursive:true});
   await atomicJSON(seenFile(ws),[...seen]);
-  const fresh = blocks;
-  if (!fresh.length) return null;
-  const text = `Claudex: reports ready (${fresh.length} of ${ready.length}${ready.length > fresh.length ? '; the rest follow at the next stop' : ''}):\n${fresh.join('\n')}`.slice(0,MAX_CONTEXT);
-  return { systemMessage:`Claudex: ${fresh.length} report(s) ready — see next turn's context`, suppressOutput:true, hookSpecificOutput:{ hookEventName:'Stop', additionalContext:text } };
+  if (!blocks.length) return null;
+  const text = `Claudex: reports ready (${blocks.length} of ${ready.length}${ready.length > blocks.length ? '; the rest follow with the next prompt' : ''}):\n${blocks.join('\n')}`;
+  return { suppressOutput:true, hookSpecificOutput:{ hookEventName:'UserPromptSubmit', additionalContext:text } };
 }
 
 export async function runHook(ws, name, input = {}) {
   if (name === 'session-start') return sessionStart(ws);
   if (name === 'handoff') return handoff(ws,input);
   if (name === 'pre-run') return preRun(ws,input);
-  if (name === 'report-ready') return reportReady(ws);
+  if (name === 'report-ready') return reportReady(ws,{ event:input.hook_event_name === 'Stop' ? 'Stop' : 'UserPromptSubmit' });
   throw new Error(`Unknown hook ${name}; one of ${HOOKS.join(', ')}`);
 }
 
@@ -187,6 +202,7 @@ export function hookSettings(ws) {
     SessionStart:[{ hooks:[hook('session-start',{ timeout:20, statusMessage:'Reading Claudex state' })] }],
     SessionEnd:[{ hooks:[hook('handoff',{ timeout:20 })] }],
     Stop:[{ hooks:[hook('handoff',{ timeout:20, async:true }), hook('report-ready',{ timeout:15 })] }],
+    UserPromptSubmit:[{ hooks:[hook('report-ready',{ timeout:15 })] }],
     PreToolUse:[{ matcher:'Bash|PowerShell', hooks:[hook('pre-run',{ timeout:15 })] }],
   };
 }

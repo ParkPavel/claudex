@@ -294,4 +294,6 @@ test('analysis warns about what no check will show, and stays quiet on a sound c
   assert.ok(!analyzeContract({...sound,decisions:['Render <Badge frame={x}>']}).length,'quoted markup is not a placeholder');
   const formatOnly={...sound,checks:[{id:'fmt',criteria:['behavior'],command:'node',args:['scripts/check.mjs','--format']}]};
   assert.ok(analyzeContract(formatOnly).some(w=>w.category==='checks'),'a generic check script is not a type checker');
+  const rust={...sound,paths:['src/main.rs'],checks:[{id:'types',criteria:['behavior'],command:'cargo',args:['check']}]};
+  assert.ok(!analyzeContract(rust).some(w=>w.category==='checks'),'cargo check is static analysis');
 });

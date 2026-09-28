@@ -84,36 +84,46 @@ export function processAlive(pid) {
 // A liveness check by PID cannot tell a reused PID from the original process;
 // it errs towards "alive", which leaves a job open rather than closing a live one.
 export const ORPHAN_GRACE_MS = 60000;
-export async function cancel(ws, id) {
+const orphaned = job => (!job.workerPid && Date.now() - Date.parse(job.created ?? 0) > ORPHAN_GRACE_MS) || (job.workerPid && !processAlive(job.workerPid));
+/**
+ * `confirmEnded` is a person's statement, with what they checked, that the
+ * stopped provider's whole process tree is gone. The harness can see only the
+ * direct child; a detached helper can outlive it, so the direct PID being gone
+ * is necessary but never sufficient, and the scope is released only on record.
+ */
+export async function cancel(ws, id, { confirmEnded = null } = {}) {
   const file = jobFile(ws,id);
   const job = await readJSON(file);
   if (TERMINAL.has(job.status)) {
-    // A stopped job whose process was not confirmed ended keeps its scope; this
-    // is where a person confirms it, and the scope is released.
     if (job.termination?.confirmed !== false) return { jobId:id, status:job.status };
     assert(!processAlive(job.termination.pid),`Provider process ${job.termination.pid} of ${id} still runs; end it, then cancel again`);
+    assert(typeof confirmEnded === 'string' && confirmEnded.trim(),`Process ${job.termination.pid} is gone, but processes it started may not be. Check for them, then record it: claudex cancel ${id} --confirm-ended --reason "<what you checked>"`);
+    // Released first: a failed release leaves the job unconfirmed, so cancel can be retried.
+    await release(ws,id);
     await withLock(ws.state, async () => {
       const current = await readJSON(file);
-      current.termination = { ...current.termination, confirmed:true, confirmedAt:new Date().toISOString() };
+      current.termination = { ...current.termination, confirmed:true, confirmedAt:new Date().toISOString(), confirmedBy:'person', reason:confirmEnded.trim() };
       await atomicJSON(file,current);
     });
-    await release(ws,id).catch(()=>{});
     return { jobId:id, status:job.status, terminationConfirmed:true };
   }
-  const neverStarted = !job.workerPid && Date.now() - Date.parse(job.created ?? 0) > ORPHAN_GRACE_MS;
-  if (neverStarted || (job.workerPid && !processAlive(job.workerPid))) {
-    assert(!processAlive(job.childPid),`Worker ${job.workerPid} is gone but provider process ${job.childPid} still runs; end it, then cancel again`);
-    const closed = await withLock(ws.state, async () => {
-      const current = await readJSON(file);
-      if (TERMINAL.has(current.status)) return { jobId:id, status:current.status };
-      const error = current.workerPid
-        ? `orphaned: worker ${current.workerPid}${current.childPid ? ` and child ${current.childPid}` : ''} ended without closing the job`
-        : 'orphaned: no worker ever started for this job';
-      Object.assign(current,{ status:'CANCELLED', error, acceptance:'UNKNOWN', updated:new Date().toISOString() });
-      await atomicJSON(file,current);
-      return { jobId:id, status:'CANCELLED', orphaned:true, error };
-    });
-    // Outside the lock: release takes the same, non-reentrant lock.
+  // Decided again under the lock: a worker may record its PID or claim its
+  // slot between a read outside the lock and the write.
+  const closed = await withLock(ws.state, async () => {
+    const current = await readJSON(file);
+    if (TERMINAL.has(current.status)) return { jobId:id, status:current.status };
+    if (!orphaned(current)) return null;
+    assert(!processAlive(current.childPid),`Worker ${current.workerPid} is gone but provider process ${current.childPid} still runs; end it, then cancel again`);
+    const error = current.workerPid
+      ? `orphaned: worker ${current.workerPid}${current.childPid ? ` and child ${current.childPid}` : ''} ended without closing the job`
+      : 'orphaned: no worker ever started for this job';
+    Object.assign(current,{ status:'CANCELLED', error, acceptance:'UNKNOWN', updated:new Date().toISOString() });
+    await atomicJSON(file,current);
+    return { jobId:id, status:'CANCELLED', orphaned:true, error };
+  });
+  if (closed) {
+    // Outside the lock: release takes the same, non-reentrant lock. A failure
+    // here leaves a stale claim that doctor reports and `claims --release` clears.
     if (closed.orphaned) await release(ws,id).catch(()=>{});
     return closed;
   }
@@ -325,8 +335,9 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     const exit = await new Promise((resolve,reject) => { settleExit = resolve; child.once('error',reject); child.once('close',(code,signal)=>resolve({code,signal})); child.stdin.on('error',()=>{}); child.stdin.end(prompt); }).finally(()=>clearInterval(interval));
     // The direct child closing is not the tree ending: a kill that failed may
     // have left a detached helper behind, so both must hold to confirm.
-    if (stopRequestedAt) job.termination = { requestedAt:new Date(stopRequestedAt).toISOString(), confirmed:!exit.unconfirmed && lastKillOk !== false, pid:child.pid };
+    // Read the kill's outcome only after an in-flight kill has finished.
     while (heartbeatBusy) await new Promise(r=>setTimeout(r,10));
+    if (stopRequestedAt) job.termination = { requestedAt:new Date(stopRequestedAt).toISOString(), confirmed:!exit.unconfirmed && lastKillOk !== false, pid:child.pid };
     await fs.writeFile(path.join(artifactDir,'events.jsonl'),stdout,{flag:'wx',mode:0o600});
     await fs.writeFile(path.join(artifactDir,'stderr.log'),stderr,{flag:'wx',mode:0o600});
     job.after = await snapshot(repo);
