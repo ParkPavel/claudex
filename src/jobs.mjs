@@ -81,21 +81,41 @@ export function processAlive(pid) {
  * record is closed here. A surviving child is named and left alone: nothing
  * replaces a worker whose process is not confirmed terminated.
  */
+// A liveness check by PID cannot tell a reused PID from the original process;
+// it errs towards "alive", which leaves a job open rather than closing a live one.
+export const ORPHAN_GRACE_MS = 60000;
 export async function cancel(ws, id) {
   const file = jobFile(ws,id);
   const job = await readJSON(file);
-  if (TERMINAL.has(job.status)) return { jobId:id, status:job.status };
-  if (job.workerPid && !processAlive(job.workerPid)) {
+  if (TERMINAL.has(job.status)) {
+    // A stopped job whose process was not confirmed ended keeps its scope; this
+    // is where a person confirms it, and the scope is released.
+    if (job.termination?.confirmed !== false) return { jobId:id, status:job.status };
+    assert(!processAlive(job.termination.pid),`Provider process ${job.termination.pid} of ${id} still runs; end it, then cancel again`);
+    await withLock(ws.state, async () => {
+      const current = await readJSON(file);
+      current.termination = { ...current.termination, confirmed:true, confirmedAt:new Date().toISOString() };
+      await atomicJSON(file,current);
+    });
+    await release(ws,id).catch(()=>{});
+    return { jobId:id, status:job.status, terminationConfirmed:true };
+  }
+  const neverStarted = !job.workerPid && Date.now() - Date.parse(job.created ?? 0) > ORPHAN_GRACE_MS;
+  if (neverStarted || (job.workerPid && !processAlive(job.workerPid))) {
     assert(!processAlive(job.childPid),`Worker ${job.workerPid} is gone but provider process ${job.childPid} still runs; end it, then cancel again`);
-    return withLock(ws.state, async () => {
+    const closed = await withLock(ws.state, async () => {
       const current = await readJSON(file);
       if (TERMINAL.has(current.status)) return { jobId:id, status:current.status };
-      const error = `orphaned: worker ${current.workerPid}${current.childPid ? ` and child ${current.childPid}` : ''} ended without closing the job`;
+      const error = current.workerPid
+        ? `orphaned: worker ${current.workerPid}${current.childPid ? ` and child ${current.childPid}` : ''} ended without closing the job`
+        : 'orphaned: no worker ever started for this job';
       Object.assign(current,{ status:'CANCELLED', error, acceptance:'UNKNOWN', updated:new Date().toISOString() });
       await atomicJSON(file,current);
-      await release(ws,id).catch(()=>{});
       return { jobId:id, status:'CANCELLED', orphaned:true, error };
     });
+    // Outside the lock: release takes the same, non-reentrant lock.
+    if (closed.orphaned) await release(ws,id).catch(()=>{});
+    return closed;
   }
   await fs.writeFile(path.join(ws.state,'jobs',`${id}.cancel`),'cancel\n',{ mode:0o600 });
   return { jobId:id, status:'CANCELLATION_REQUESTED' };
@@ -108,7 +128,7 @@ export async function cancel(ws, id) {
  * this in the background is woken by its exit instead of polling by hand.
  */
 export async function waitForJobs(ws, ids, { timeoutMs = 40*60000, intervalMs = 5000 } = {}) {
-  if (!ids.length) ids = (await listJobs(ws)).filter(j => !TERMINAL.has(j.status)).map(j => j.id);
+  ids = ids.length ? [...new Set(ids)] : (await listJobs(ws)).filter(j => !TERMINAL.has(j.status)).map(j => j.id);
   const deadline = Date.now() + timeoutMs;
   const done = new Map();
   while (done.size < ids.length) {
@@ -144,11 +164,24 @@ export async function runWorker(ws,id) {
     Object.assign(job,extra,{ status, updated:new Date().toISOString() });
     await atomicJSON(file,job);
   };
+  // A failed or timed-out job's postmortem is written before its terminal
+  // status, so whoever sees the status also finds the report.
+  const finish = async (status, extra, stage) => {
+    Object.assign(job,extra,{ status, updated:new Date().toISOString() });
+    if (['FAILED','TIMED_OUT'].includes(status)) await writePostmortem(ws,job,repo,stage);
+    await atomicJSON(file,job);
+  };
   const artifactDir = path.join(ws.state,'artifacts',id);
   let child;
   let claimed = false;
   let repo = ws.project;
   try {
+    // Recorded at once, while still QUEUED: a job whose worker died before its
+    // slot came up is then recognisable as orphaned instead of merely waiting.
+    await withLock(ws.state,async () => {
+      const current = await readJSON(file);
+      if (current.status === 'QUEUED' && !current.workerPid) { job.workerPid = process.pid; await atomicJSON(file,{...current,workerPid:process.pid}); }
+    });
     const declared = await validatePacket(packet);
     const taskContract = await validateTaskPacket(ws,packet);
     assert((taskContract?.digest??null)===(job.taskContract?.digest??null),'Task contract changed after submission; inspect and resubmit');
@@ -186,7 +219,10 @@ export async function runWorker(ws,id) {
       assert(repo !== ws.project,'Writer must use a separate worktree');
       const branch = (await git(repo,['branch','--show-current'])).trim();
       assert(branch && !['main','master'].includes(branch),'Writer requires a feature branch');
-      assert(!(await listJobs(ws)).some(j=>j.id !== id && !TERMINAL.has(j.status) && j.packet.worktree === packet.worktree && j.packet.authority === 'workspace-write'),'Another writer owns this worktree');
+      const writers = (await listJobs(ws)).filter(j=>j.id !== id && j.packet.worktree === packet.worktree && j.packet.authority === 'workspace-write');
+      assert(!writers.some(j=>!TERMINAL.has(j.status)),'Another writer owns this worktree');
+      const unconfirmed = writers.find(j=>j.termination?.confirmed === false);
+      assert(!unconfirmed,`A stopped writer in this worktree (${unconfirmed?.id}) may still be running; confirm it ended with: claudex cancel ${unconfirmed?.id}`);
     }
     for (const rel of packet.paths) {
       assert(!path.isAbsolute(rel),'Scope paths must be relative');
@@ -267,7 +303,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     // the elevated Windows sandbox) once kept a timed-out job RUNNING for hours.
     // The kill is repeated, and after STOP_GRACE_MS the worker stops waiting and
     // records that termination was not confirmed instead of hanging.
-    let heartbeatBusy = false, settleExit = null, stopRequestedAt = null, lastKill = 0;
+    let heartbeatBusy = false, settleExit = null, stopRequestedAt = null, lastKill = 0, lastKillOk = null;
     const interval = setInterval(async () => {
       if (heartbeatBusy) return;
       heartbeatBusy = true;
@@ -276,7 +312,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
         if (!stopped && ((!ready && Date.now()-started > ws.config.readyTimeoutMs) || Date.now()-started > ws.config.runTimeoutMs)) stopped = 'TIMED_OUT';
         if (stopped) {
           stopRequestedAt ??= Date.now();
-          if (Date.now()-lastKill >= STOP_RETRY_MS) { lastKill = Date.now(); await stopTree(child); }
+          if (Date.now()-lastKill >= STOP_RETRY_MS) { lastKill = Date.now(); lastKillOk = await stopTree(child); }
           if (Date.now()-stopRequestedAt > STOP_GRACE_MS) {
             child.stdout.destroy(); child.stderr.destroy();
             settleExit?.({ code:null, signal:null, unconfirmed:true });
@@ -287,7 +323,9 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
       finally { heartbeatBusy = false; }
     },250);
     const exit = await new Promise((resolve,reject) => { settleExit = resolve; child.once('error',reject); child.once('close',(code,signal)=>resolve({code,signal})); child.stdin.on('error',()=>{}); child.stdin.end(prompt); }).finally(()=>clearInterval(interval));
-    if (stopRequestedAt) job.termination = { requestedAt:new Date(stopRequestedAt).toISOString(), confirmed:!exit.unconfirmed, pid:child.pid };
+    // The direct child closing is not the tree ending: a kill that failed may
+    // have left a detached helper behind, so both must hold to confirm.
+    if (stopRequestedAt) job.termination = { requestedAt:new Date(stopRequestedAt).toISOString(), confirmed:!exit.unconfirmed && lastKillOk !== false, pid:child.pid };
     while (heartbeatBusy) await new Promise(r=>setTimeout(r,10));
     await fs.writeFile(path.join(artifactDir,'events.jsonl'),stdout,{flag:'wx',mode:0o600});
     await fs.writeFile(path.join(artifactDir,'stderr.log'),stderr,{flag:'wx',mode:0o600});
@@ -297,9 +335,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
     job.evidenceFreshness = configurationCurrent && (packet.authority === 'workspace-write' || job.before.digest === job.after.digest) ? 'CURRENT' : 'STALE';
     job.providerError = providerError;
     if (stopped) {
-      const stage = job.status;
-      await save(stopped,{exit,providerError});
-      await writePostmortem(ws,job,repo,stage);
+      await finish(stopped,{exit,providerError},job.status);
       return;
     }
     assert(exit.code === 0,`Worker exited unsuccessfully (${exit.code}); inspect local artifacts`);
@@ -322,12 +358,12 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
       const current = await readJSON(file);
       if (current.status !== 'QUEUED') return;
     }
-    const stage = job.status;
-    await save('FAILED',{error:error.message,acceptance:'UNKNOWN',providerError:job.providerError ?? null,providerFailure:job.providerFailure ?? null});
-    await writePostmortem(ws,job,repo,stage);
+    await finish('FAILED',{error:error.message,acceptance:'UNKNOWN',providerError:job.providerError ?? null,providerFailure:job.providerFailure ?? null},job.status);
   } finally {
-    // A finished job stops holding its scope, whatever it finished as.
-    if (TERMINAL.has(job.status)) await release(ws,id).catch(()=>{});
+    // A finished job stops holding its scope, whatever it finished as, unless
+    // its provider may still be running: then the scope stays claimed until
+    // cancel confirms the process ended, so no second writer joins it.
+    if (TERMINAL.has(job.status) && job.termination?.confirmed !== false) await release(ws,id).catch(()=>{});
   }
 }
 

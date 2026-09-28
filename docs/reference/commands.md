@@ -26,7 +26,7 @@ than inferred from the currently focused application.
 | `wait [JOB …] [--timeout-min N]` | Block until the jobs (default: every active one) finish and print their verdicts, gaps and postmortems; exit 2 on timeout. Run it in the background to be woken when a review ends |
 | `retro [--since DATE]` | Journal retrospective: failure causes, per-model jobs, cost and input tokens, UNKNOWN share, unanswered criteria, slowest runs |
 | `hook NAME` | Claude Code hook entrypoints (`session-start`, `handoff`, `pre-run`, `report-ready`); read the event on stdin and never block |
-| `hooks --install` | Merge the Claudex hooks into `.claude/settings.local.json`, replacing earlier Claudex entries and keeping foreign ones |
+| `hooks --install` | Merge the Claudex hooks into `.claude/settings.local.json` in exec form (no shell, so a path is never a command; the gate matches `Bash\|PowerShell`), replacing only earlier Claudex hooks and keeping every other hook, even one sharing an entry |
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
 | `check-project` | Execute the selected profile's commands in the managed project |
 | `modes [--status\|--debt\|--json]` | Show who answers for which roles and what re-check is owed |
@@ -156,9 +156,16 @@ UNKNOWN with the reason, and the job records `resultGaps` (`missing`, and `unexp
 invented criteria, which are dropped). A result with no criterion answered still fails.
 
 A stop (cancel, timeout, output overflow) is repeated every five seconds until the provider's
-process tree closes. After thirty seconds the worker stops waiting, records
-`termination.confirmed: false` with the process ID, and the postmortem asks to make sure that
-process ended before resubmitting.
+process tree closes. Termination is confirmed only when the child closed and the last kill
+succeeded. After thirty seconds the worker stops waiting and records
+`termination.confirmed: false` with the process ID. Such a job keeps its claimed scope and
+blocks another writer in the same worktree until `cancel JOB` finds the process gone and
+confirms it. The postmortem is written before the terminal status, so whoever sees the status
+also finds the report.
+
+A job whose worker died is closed by `cancel` as `orphaned`; so is a queued job that no worker
+picked up within a minute (a worker records its process ID as soon as it starts). A process ID
+check cannot tell a reused ID from the original process; it errs towards leaving a job open.
 
 ## Check runs handed to a reviewer
 

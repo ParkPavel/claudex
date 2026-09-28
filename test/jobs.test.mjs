@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { providerErrorText, validateResult } from '../src/adapters.mjs';
 import { buildPostmortem, cancel, classifyProviderFailure, jobFile, waitForJobs } from '../src/jobs.mjs';
 import { atomicJSON, readJSON } from '../src/io.mjs';
+import { claim, readClaims } from '../src/claims.mjs';
 
 async function fixture(t) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'claudex-jobs-test-'));
@@ -70,6 +71,36 @@ test('cancel closes a job whose worker and child are gone',async t=>{
   assert.match(job.error,/^orphaned: worker \d+ and child \d+/);
 });
 
+test('closing an orphan releases its claimed scope',async t=>{
+  const ws=await fixture(t);
+  const id='writer-orphan';
+  await atomicJSON(jobFile(ws,id),{id,taskId:'w',packet:{...packet,authority:'workspace-write'},status:'RUNNING',workerPid:deadPid(),childPid:null,acceptance:'UNKNOWN'});
+  await claim(ws,{id,owner:'job',ref:'w (implementer)',paths:['a.txt']});
+  assert.equal((await cancel(ws,id)).status,'CANCELLED');
+  assert.ok(!JSON.stringify(await readClaims(ws)).includes(id),'claim released');
+});
+
+test('a queued job no worker ever picked up is closed after the grace period, not before',async t=>{
+  const ws=await fixture(t);
+  await atomicJSON(jobFile(ws,'stale'),{id:'stale',taskId:'s',packet,status:'QUEUED',workerPid:null,created:new Date(Date.now()-120000).toISOString()});
+  await atomicJSON(jobFile(ws,'fresh'),{id:'fresh',taskId:'f',packet,status:'QUEUED',workerPid:null,created:new Date().toISOString()});
+  assert.match((await cancel(ws,'stale')).error,/no worker ever started/);
+  assert.equal((await cancel(ws,'fresh')).status,'CANCELLATION_REQUESTED');
+});
+
+test('an unconfirmed stop keeps its scope until cancel confirms the process ended',async t=>{
+  const ws=await fixture(t);
+  const id='stopped';
+  await atomicJSON(jobFile(ws,id),{id,taskId:'x',packet:{...packet,authority:'workspace-write'},status:'TIMED_OUT',termination:{requestedAt:'2026-09-28T00:00:00Z',confirmed:false,pid:process.pid}});
+  await claim(ws,{id,owner:'job',ref:'x',paths:['a.txt']});
+  await assert.rejects(cancel(ws,id),new RegExp(`Provider process ${process.pid} of stopped still runs`));
+  const job=await readJSON(jobFile(ws,id));
+  await atomicJSON(jobFile(ws,id),{...job,termination:{...job.termination,pid:deadPid()}});
+  assert.equal((await cancel(ws,id)).terminationConfirmed,true);
+  assert.equal((await readJSON(jobFile(ws,id))).termination.confirmed,true);
+  assert.ok(!JSON.stringify(await readClaims(ws)).includes(id));
+});
+
 test('cancel refuses to close a job while its provider process still runs',async t=>{
   const ws=await fixture(t);
   const id='probe-live-child';
@@ -99,6 +130,8 @@ test('wait returns verdicts of finished jobs and names the ones still running',a
   assert.deepEqual(waited.jobs[0].criteria,[{id:'one',status:'FAIL'}]);
   assert.deepEqual(waited.jobs[0].findings,['a.txt:2 wrong']);
   assert.deepEqual(waited.jobs[0].resultGaps.missing,['two']);
+  const twice=await waitForJobs(ws,['probe-done','probe-done'],{timeoutMs:5000,intervalMs:10});
+  assert.deepEqual([twice.jobs.length,twice.timedOut],[1,false]);
   const all=await waitForJobs(ws,[],{timeoutMs:20,intervalMs:10});
   assert.deepEqual(all.pending,['probe-running']);
 });

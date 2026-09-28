@@ -135,7 +135,7 @@ const PLACEHOLDER=/\b(TODO|TBD|FIXME|TKTK)\b|\?\?\?/;
 const CODE_PATH=/\.(?:[cm]?[jt]sx?|svelte|vue|swift|kt|py|rs|go)$|^(?:[^.]*\/)?(?:src|lib|app|tests?|__tests__)(?:\/[^.]*)?$/;
 // Contracts often call the tool a script wraps (node node_modules/eslint/...).
 const SCRIPT_ALIASES={test:/\btest\b|jest|vitest|mocha|--test/,build:/\bbuild\b|esbuild|vite build|webpack|rollup/,lint:/\blint\b|eslint/};
-const STATIC_CHECK=/lint|tsc|typecheck|type-check|svelte-check|swiftlint|mypy|clippy|\bcheck\b/i;
+const STATIC_CHECK=/lint|\btsc\b|typecheck|type-check|svelte-check|swiftlint|mypy|clippy/i;
 export function analyzeContract(c,{principles=null}={}) {
   const warnings=[];
   const warn=(category,severity,summary)=>warnings.push({id:`${category[0].toUpperCase()}${warnings.filter(w=>w.category===category).length+1}`,category,severity,summary});
@@ -222,8 +222,12 @@ export async function checkEvidenceFor(ws,contractId,sourceDigest) {
     if(!latest.has(e.checkId)||Number(e.sequence)>Number(latest.get(e.checkId).sequence))latest.set(e.checkId,e);
   }
   const out=[];
+  // Source alone is not the state a run describes: a changed check command,
+  // criterion or configuration makes an old PASS answer a different question.
+  const now=await context(ws,t);
   for(const e of [...latest.values()].sort((a,b)=>a.checkId.localeCompare(b.checkId))) {
-    const current=e.freshness==='CURRENT'&&e.before?.digest===sourceDigest&&e.after?.digest===sourceDigest;
+    const current=e.freshness==='CURRENT'&&e.before?.digest===sourceDigest&&e.after?.digest===sourceDigest&&
+      e.configurationDigest===now.configurationDigest&&e.contractDigest===now.contractDigest;
     let log=null,logState='MISSING';
     try {
       const bytes=await fs.readFile(await contained(ws.state,path.resolve(ws.root,e.artifact)));

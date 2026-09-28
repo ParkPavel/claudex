@@ -55,8 +55,36 @@ test('installing hooks keeps foreign entries and replaces earlier Claudex ones, 
   assert.equal(merged.hooks.Stop.length,2);
   assert.equal(merged.hooks.Stop[0].hooks[0].command,'notify-me');
   assert.equal(merged.hooks.PreToolUse.length,1);
-  assert.match(merged.hooks.PreToolUse[0].hooks[0].command,/hook pre-run --workspace "C:\/work"/);
+  assert.equal(merged.hooks.PreToolUse[0].matcher,'Bash|PowerShell');
+  assert.deepEqual(merged.hooks.PreToolUse[0].hooks[0].args.slice(1),['hook','pre-run','--workspace','C:/work']);
   assert.deepEqual(mergeHookSettings(merged,hookSettings(ws)),merged);
+});
+
+test('a hook sharing an entry with a Claudex hook survives the install',()=>{
+  const current={hooks:{Stop:[{hooks:[{type:'command',command:'node C:/w/.local/claudex/hooks/handoff.mjs'},{type:'command',command:'audit-log'}]}]}};
+  const merged=mergeHookSettings(current,hookSettings({root:'C:/w'}));
+  assert.deepEqual(merged.hooks.Stop[0].hooks,[{type:'command',command:'audit-log'}]);
+  assert.equal(merged.hooks.Stop.length,2);
+});
+
+test('hooks run without a shell, so a path is never a command',()=>{
+  const root='C:/work/$(calc)/`id`';
+  for(const entries of Object.values(hookSettings({root})))for(const entry of entries)for(const hook of entry.hooks) {
+    assert.equal(hook.command,process.execPath);
+    assert.ok(hook.args.includes(root));
+  }
+});
+
+test('reports that do not fit wait for the next stop instead of being lost',async t=>{
+  const ws=await fixture(t);
+  const now=Date.parse('2026-09-28T12:00:00Z');
+  for(let i=1;i<=5;i++)await atomicJSON(jobFile(ws,'j'+i),{id:'j'+i,taskId:'t'+i,status:'FAILED',updated:'2026-09-28T11:0'+i+':00Z',error:'x'});
+  const first=(await reportReady(ws,{now})).hookSpecificOutput.additionalContext;
+  assert.match(first,/3 of 5; the rest follow/);
+  assert.match(first,/t1 -> FAILED[\s\S]*t3 -> FAILED/);
+  const second=(await reportReady(ws,{now})).hookSpecificOutput.additionalContext;
+  assert.match(second,/t4 -> FAILED[\s\S]*t5 -> FAILED/);
+  assert.equal(await reportReady(ws,{now}),null);
 });
 
 test('a finished job is reported once, and old backlog is not news',async t=>{

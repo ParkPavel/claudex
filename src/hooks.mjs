@@ -137,21 +137,29 @@ function summarise(job, result, postmortem) {
 export async function reportReady(ws, { now = Date.now() } = {}) {
   const seen = new Set(await quiet(() => readJSON(seenFile(ws))) ?? []);
   const ready = [];
-  for (const job of await listJobs(ws)) {
+  for (const job of (await listJobs(ws)).sort((a,b) => String(a.updated ?? '').localeCompare(String(b.updated ?? '')))) {
     if (!TERMINAL.has(job.status) || seen.has(job.id)) continue;
-    seen.add(job.id);
     const finished = Date.parse(job.updated ?? job.created ?? 0);
-    if (Number.isFinite(finished) && now - finished > FRESH_MS) continue;
+    // Backlog is marked seen silently; a fresh report is marked only once shown.
+    if (Number.isFinite(finished) && now - finished > FRESH_MS) { seen.add(job.id); continue; }
+    ready.push(job);
+  }
+  // Oldest first, a few per stop: a report that does not fit waits for the next
+  // stop instead of being marked seen unshown.
+  const shown = ready.slice(0,MAX_REPORTS);
+  const blocks = [];
+  for (const job of shown) {
+    seen.add(job.id);
     const dir = job.artifactDirectory ?? path.join(ws.state,'artifacts',job.id);
     const result = await quiet(() => readJSON(path.join(dir,'result.json')));
     const postmortem = await quiet(() => readJSON(path.join(dir,'postmortem.json')));
-    ready.push(`${job.taskId} -> ${job.status}\n${summarise(job,result,postmortem)}\n  full result: ${path.join(dir,'result.json')}`);
+    blocks.push(`${job.taskId} -> ${job.status}\n${summarise(job,result,postmortem)}\n  full result: ${path.join(dir,'result.json')}`);
   }
   await fs.mkdir(path.dirname(seenFile(ws)),{recursive:true});
   await atomicJSON(seenFile(ws),[...seen]);
-  const fresh = ready.slice(-MAX_REPORTS);
+  const fresh = blocks;
   if (!fresh.length) return null;
-  const text = `Claudex: reports ready (${fresh.length} of ${ready.length}):\n${fresh.join('\n')}`.slice(0,MAX_CONTEXT);
+  const text = `Claudex: reports ready (${fresh.length} of ${ready.length}${ready.length > fresh.length ? '; the rest follow at the next stop' : ''}):\n${fresh.join('\n')}`.slice(0,MAX_CONTEXT);
   return { systemMessage:`Claudex: ${fresh.length} report(s) ready — see next turn's context`, suppressOutput:true, hookSpecificOutput:{ hookEventName:'Stop', additionalContext:text } };
 }
 
@@ -169,23 +177,30 @@ export async function runHook(ws, name, input = {}) {
  * into whatever that file already holds and replaces only earlier Claudex
  * entries, recognised by the command they run.
  */
+// Exec form: `command` is spawned with `args` and no shell, so a workspace path
+// holding $() or backticks is a path, not a command. The same form runs under
+// Git Bash and PowerShell, and the gate matches both shell tools.
 export function hookSettings(ws) {
-  const cli = path.join(ROOT,'bin','claudex.mjs').split(path.sep).join('/');
-  const root = ws.root.split(path.sep).join('/');
-  const cmd = name => `node "${cli}" hook ${name} --workspace "${root}"`;
+  const cli = path.join(ROOT,'bin','claudex.mjs');
+  const hook = (name, extra = {}) => ({ type:'command', command:process.execPath, args:[cli,'hook',name,'--workspace',ws.root], ...extra });
   return {
-    SessionStart:[{ hooks:[{ type:'command', command:cmd('session-start'), timeout:20, statusMessage:'Reading Claudex state' }] }],
-    SessionEnd:[{ hooks:[{ type:'command', command:cmd('handoff'), timeout:20 }] }],
-    Stop:[{ hooks:[{ type:'command', command:cmd('handoff'), timeout:20, async:true }, { type:'command', command:cmd('report-ready'), timeout:15 }] }],
-    // Filtered in the shell first: starting node for every Bash call costs more
-    // than the gate is worth, and only a command naming claudex.mjs and run matters.
-    PreToolUse:[{ matcher:'Bash', hooks:[{ type:'command', command:`payload=$(cat); case "$payload" in *claudex.mjs*run*) printf '%s' "$payload" | ${cmd('pre-run')} ;; esac`, timeout:15 }] }],
+    SessionStart:[{ hooks:[hook('session-start',{ timeout:20, statusMessage:'Reading Claudex state' })] }],
+    SessionEnd:[{ hooks:[hook('handoff',{ timeout:20 })] }],
+    Stop:[{ hooks:[hook('handoff',{ timeout:20, async:true }), hook('report-ready',{ timeout:15 })] }],
+    PreToolUse:[{ matcher:'Bash|PowerShell', hooks:[hook('pre-run',{ timeout:15 })] }],
   };
 }
-const ours = entry => (entry.hooks ?? []).some(hook => / hook (session-start|handoff|pre-run|report-ready)\b/.test(hook.command ?? '') || /claudex[\\/]hooks[\\/][\w-]+\.mjs/.test(hook.command ?? ''));
+const HOOK_NAME = /^(session-start|handoff|pre-run|report-ready)$/;
+const isOurs = hook => (Array.isArray(hook.args) && hook.args.some(a => /claudex\.mjs$/.test(String(a))) && hook.args.some(a => HOOK_NAME.test(String(a))))
+  || / hook (session-start|handoff|pre-run|report-ready)\b/.test(hook.command ?? '')
+  || /claudex[\\/]hooks[\\/][\w-]+\.mjs/.test(hook.command ?? '');
+/** Removes only Claudex's own hooks; an entry keeps its other hooks, and goes only when it holds nothing else. */
 export function mergeHookSettings(current, wanted) {
   const hooks = { ...(current.hooks ?? {}) };
-  for (const [event, entries] of Object.entries(wanted)) hooks[event] = [...(hooks[event] ?? []).filter(entry => !ours(entry)), ...entries];
+  for (const [event, entries] of Object.entries(wanted)) {
+    const kept = (hooks[event] ?? []).map(entry => ({ ...entry, hooks:(entry.hooks ?? []).filter(hook => !isOurs(hook)) })).filter(entry => entry.hooks.length);
+    hooks[event] = [...kept, ...entries];
+  }
   return { ...current, hooks };
 }
 export async function installHooks(ws) {

@@ -120,6 +120,8 @@ State, evidence and credentials never belong in the public repository.`);
     // A hook fails open: whatever goes wrong, the session, turn or tool call proceeds.
     try {
       let raw='';if(!process.stdin.isTTY)for await(const chunk of process.stdin)raw+=chunk;
+      // The gate runs on every shell call; most never name Claudex.
+      if(options._[1]==='pre-run'&&!raw.includes('claudex.mjs'))process.exit(0);
       let input={};try{input=JSON.parse(raw||'{}');}catch{}
       const ws=await resolveWorkspace(options.workspace || input.cwd || process.cwd());
       const output=await runHook(ws,options._[1],input);

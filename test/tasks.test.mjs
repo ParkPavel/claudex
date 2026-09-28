@@ -258,6 +258,13 @@ test('a reviewer receives the latest check run, CURRENT only on its own snapshot
   assert.equal(check.evidenceId,second.id);
   assert.deepEqual([check.checkId,check.status,check.freshness,check.logState],['check','PASS','CURRENT','OK']);
   assert.match(check.log,/verified/);
+  const contractFile=path.join(ws.state,'tasks','feature','contract.json');
+  const saved=await fs.readFile(contractFile,'utf8');
+  const edited=JSON.parse(saved);edited.checks[0].args=['-e','console.log("other")'];
+  await atomicJSON(contractFile,edited);
+  assert.equal((await checkEvidenceFor(ws,'feature',(await snapshot(project)).digest))[0].freshness,'STALE','a changed check makes the old run STALE');
+  await fs.writeFile(contractFile,saved);
+  assert.equal((await checkEvidenceFor(ws,'feature',(await snapshot(project)).digest))[0].freshness,'CURRENT');
   await fs.writeFile(path.join(project,'app.txt'),'changed\n');
   assert.equal((await checkEvidenceFor(ws,'feature',(await snapshot(project)).digest))[0].freshness,'STALE');
   await fs.appendFile(path.resolve(ws.root,second.artifact),'forged PASS\n');
@@ -285,4 +292,6 @@ test('analysis warns about what no check will show, and stays quiet on a sound c
   const docs={...weak,paths:['README.md'],goal:'Document the table'};
   assert.ok(!analyzeContract(docs,{principles:{checks:'npm run build'}}).some(w=>['checks','principles'].includes(w.category)),'documentation owes no build');
   assert.ok(!analyzeContract({...sound,decisions:['Render <Badge frame={x}>']}).length,'quoted markup is not a placeholder');
+  const formatOnly={...sound,checks:[{id:'fmt',criteria:['behavior'],command:'node',args:['scripts/check.mjs','--format']}]};
+  assert.ok(analyzeContract(formatOnly).some(w=>w.category==='checks'),'a generic check script is not a type checker');
 });
