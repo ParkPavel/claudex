@@ -11,6 +11,25 @@ one of them.
 | [Superpowers](https://github.com/obra/superpowers) — Jesse Vincent | MIT | skills that activate on their own; worktree isolation; test before the fix; review before finishing | adapted in `skills/` (spec-workflow, systematic-diagnosis, evidence-gate) and the worktree model; no code copied |
 | [Graphify](https://github.com/Graphify-Labs/graphify) — Safi Shamsi and the Graphify contributors | Apache-2.0 (portions MIT) | a local code graph from tree-sitter ASTs with EXTRACTED / INFERRED / AMBIGUOUS edges, plus LLM extraction for documents | **vendored** in `vendor/graphify` with a patch; see below |
 
+## Later sources
+
+Studied in a 2026-09-28 improvement session, to solve Claudex's own recorded problems with
+examples from similar projects rather than to add another mechanism for pulling in outside code.
+
+| Source | License | What Claudex takes | How |
+|---|---|---|---|
+| [Spec Kit](https://github.com/github/spec-kit) `analyze` / `clarify` | MIT | a consistency pass over the specification before implementation; asking what only the person can decide | deterministic warnings in `task check` (`analyzeContract`); the spec-workflow skill records such answers as decisions; no code copied |
+| [prompt-agent](https://github.com/kvyb/prompt-agent) — kvyb | see repository | scoring past sessions by efficiency, goal, tool correctness and failure points | `claudex retro` over the job journal; no code copied |
+| [skills](https://github.com/emilkowalski/skills) — Emil Kowalski | MIT | design engineering, motion, gestures, web-on-phone fixes, Swift | **copied** into `library/emil` with its license, read through the `native-ui-quality` skill |
+| [HIGAgentSkills](https://github.com/justinwetch/HIGAgentSkills) — Justin Wetch | none declared | Apple HIG distilled into 156 files with a tiered routing index | kept as a local reference in `library/apple-hig`; the routing idea shapes `native-ui-quality` |
+| [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) | Apple | the quality bar itself | cited as the primary source; not redistributed |
+| [Claude Code hooks](https://code.claude.com/docs/en/hooks) | documentation | exec-form hooks, the `Bash\|PowerShell` matcher, Stop context semantics | `claudex hook` and `hooks --install` |
+
+Evaluated and not integrated: the [TypeSafe agent skill](https://docs.typesafe.ai/agent-skill)
+and its Jev model (typed Choice / Score / Noul answers with probabilities). It could advise on
+routing and finding triage, but it is an external service and was judged not yet reliable
+enough to sit in the job path.
+
 ## Why these three
 
 Spec Kit makes the specification the unit of work, but it trusts the implementer to report
@@ -43,5 +62,5 @@ installed: they rewrite entry points that Claudex generates and verifies.
 ## Thanks
 
 To GitHub and the Spec Kit contributors, to Jesse Vincent and the Superpowers contributors,
-and to Safi Shamsi and the Graphify contributors — for publishing their work openly, with
-licenses that allow it to be studied, adapted and built upon.
+to Safi Shamsi and the Graphify contributors, to Emil Kowalski, to Justin Wetch and to kvyb —
+for publishing their work openly, so that it can be studied, adapted and built upon.

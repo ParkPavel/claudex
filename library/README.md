@@ -18,8 +18,9 @@ checked against the current source or platform documentation before it becomes a
 | `apple-hig/` | [justinwetch/HIGAgentSkills](https://github.com/justinwetch/HIGAgentSkills) | `701151a7b39609b71a58d54de6d86e3500c0c316` | none declared | Apple Human Interface Guidelines, distilled into 156 routed files |
 
 `apple-hig/` carries no license and restates Apple's guidelines; the repository says it is
-an independent reference, not affiliated with or endorsed by Apple. It is kept here for
-local reference only. Do not publish it with Claudex or quote it at length; link to
+an independent reference, not affiliated with or endorsed by Apple. It is therefore **not
+tracked** here (`.gitignore`): each machine downloads it at the pinned commit with
+`node library/fetch-hig.mjs`. Do not publish it with Claudex or quote it at length; link to
 [developer.apple.com/design/human-interface-guidelines](https://developer.apple.com/design/human-interface-guidelines)
 when a rule is cited in anything public.
 

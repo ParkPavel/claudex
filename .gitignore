@@ -21,3 +21,6 @@ Thumbs.db
 .agents/
 AGENTS.md
 CLAUDE.md
+
+# Local reference only (no license declared): fetch with node library/fetch-hig.mjs
+library/apple-hig/

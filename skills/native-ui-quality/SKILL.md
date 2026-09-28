@@ -10,7 +10,8 @@ can be interrupted, puts things where the hand expects them and never makes a pe
 That bar is public, specific and understood by everyone who owns a phone, which is why it
 is the reference even for interfaces that also run on the desktop.
 
-The detail lives in `library/` of the harness (`claudex/library/README.md`). Read only the
+The detail lives in `library/` of the harness (`claudex/library/README.md`); when
+`library/apple-hig` is missing, it is fetched with `node library/fetch-hig.mjs`. Read only the
 files the task needs, cite the file you took a rule from, and check every value against the
 current platform before it becomes a decision. The library informs; the project's own design
 system, the contract and the recorded principles decide.

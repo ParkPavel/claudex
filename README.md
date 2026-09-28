@@ -1,144 +1,165 @@
+<div align="center">
+
 # Claudex
 
-**One workspace. A shared contract. Claude Code and Codex working against the same evidence.**
+**One workspace · one shared contract · Claude Code and Codex working against the same evidence**
 
-Claudex is a small, local-first harness for coordinating AI-assisted development. It keeps
-the maintained instructions in one repository, gives each job an explicit role and source
-snapshot, and separates a model's completion claim from verified acceptance. Its Obsidian
-profile uses the native Obsidian CLI for live evidence.
+**English** · [Русский](README.ru.md)
 
-[Русская документация](README.ru.md) · [Architecture](docs/explanation/architecture.md) ·
-[Security](SECURITY.md) · [Evidence register](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Node.js ≥ 22](https://img.shields.io/badge/node-%E2%89%A5%2022-339933?logo=node.js&logoColor=white)](package.json)
+[![Runtime dependencies: none](https://img.shields.io/badge/runtime%20deps-none-brightgreen.svg)](package.json)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](docs/how-to/setup.md)
+[![Providers](https://img.shields.io/badge/providers-Claude%20Code%20%2B%20Codex-8A2BE2.svg)](docs/explanation/architecture.md)
+[![Profiles](https://img.shields.io/badge/profiles-generic%20%7C%20obsidian-orange.svg)](#profiles)
 
-## Workspace layout
+</div>
 
-```text
-your-desktop/                       # Local workspace; do not publish this directory
-├── claudex/                        # This public repository: maintained policy and tooling
-├── your-project/                   # A separate Git repository
-├── .local/claudex/                 # Machine configuration, jobs, evidence and backups
-├── .tmp/                           # Disposable work; retention is your choice
-├── .claudex.json                   # Small local workspace pointer
-├── AGENTS.md                       # Generated Codex/shared entrypoint
-├── CLAUDE.md                       # Generated Claude entrypoint
-├── .codex/                         # Small generated native role definitions
-├── .claude/                        # Small generated native role/skill definitions
-└── .agents/                        # Small generated skill entrypoints
-```
+Claudex is a small, local-first harness for developing with two AI providers on a real product.
+It keeps the maintained instructions in one place, gives every job an explicit role and a pinned
+source snapshot, and keeps a model's *"done"* apart from verified acceptance.
 
-Only `claudex/` is this project's publication boundary. Vaults, private notes, screenshots,
-conversations, credentials and arbitrary user folders stay outside it. Generated files point
-to the maintained contract and skills; `sync` checks their hashes before updating them.
+> **The one idea.** Completion is decided by evidence bound to the exact state it was taken
+> from — source, configuration and specification digests — and a different model reviews what
+> one model produced. Anything not shown stays `UNKNOWN`; it never becomes `PASS` by default.
 
-## Get started
+---
 
-Requirements: Node.js 22+, Git, authenticated Claude Code and Codex installations. The
-Obsidian profile additionally needs the desktop CLI and a designated test vault. Windows
-and Linux are covered by the CI configuration; real-host results are recorded separately.
+## Contents
+
+[Quick start](#quick-start) · [How a task flows](#how-a-task-flows) · [Profiles](#profiles) ·
+[Reports](#reports) · [Skills and library](#skills-and-reference-library) · [Security](#security) ·
+[References](#references) · [Documentation](#documentation)
+
+## Quick start
+
+Requirements: Node.js 22+, Git, and logged-in Claude Code and Codex CLIs. The managed project is
+its own Git repository next to `claudex/`.
 
 ```sh
 git clone https://github.com/ParkPavel/claudex.git
-cd claudex && npm ci
+cd claudex
 node bin/claudex.mjs setup --workspace ..
-node bin/claudex.mjs doctor --workspace ..
 ```
 
-`setup` opens a window and asks the things an installation cannot decide for you: which
-project it manages, how much it may do without asking, and which model answers for which
-role. It lists what it will create around your project before creating any of it. In a
-script, `init` takes the same decisions as flags and never prompts.
+The setup window writes nothing until you confirm its summary. In order, it:
 
-Your managed project must already be a Git repository beside `claudex`. For Obsidian, choose
-the `obsidian` profile and follow the [Obsidian setup guide](docs/how-to/obsidian.md).
-Authentication stays with the provider CLIs; Claudex does not copy credentials into its
-repository. See [install and adapt](docs/how-to/setup.md) for the full walkthrough.
+1. **shows the environment** it found — node, git, both provider CLIs — so a missing tool is
+   found now, not by the first failed job;
+2. asks for the **managed project** and lists what will be created around it;
+3. offers the **profile** the project looks like (an Obsidian manifest → `obsidian`);
+4. asks **what a writer may do without asking** (`full`, `scoped`, `approval`);
+5. asks **which model answers for which role**, one line per role;
+6. records **working principles** — the language to answer in, the protected branch, who merges,
+   the checks required before "done" — so no agent ever relays your consent secondhand;
+7. offers to install the **Claude Code hooks**, and ends by running `doctor`.
 
-### From a release archive
+Run it again at any time to change an answer. A script uses `init` with flags instead. A release
+archive installs by unpacking and opening `setup.cmd` (Windows) or `setup.sh` (Linux/macOS).
 
-Unpack `claudex-<version>.zip` beside the Git repository you want to manage. On Windows,
-double-click `setup.cmd`; on Linux or macOS, run `./setup.sh`. The launcher opens the same
-installation window and uses the archive's parent folder as the workspace. Pass another
-workspace path as its first argument when needed.
+## How a task flows
 
-The archive is self-contained: it has no runtime npm dependencies, so unpacking and opening
-the launcher is the installation. Its accompanying `.sha256` file identifies the exact bytes
-you received. Maintainers create and verify both files with `npm run release:archive`.
+```text
+ task init ──► task check ──► worktree + approve ──► run (implementer) ──► task verify
+  contract      warnings        isolated checkout       writes on a            checks bound
+                                                         feature branch         to the snapshot
+                                                                                     │
+ task converge ◄── wait / report ◄── run (auditor, other provider, read-only) ◄──────┘
+  PASS · FAIL · UNKNOWN per criterion
+```
 
-## Adapt it to your stack
-
-| Decision | Default | Change it with |
+| Step | Command | What it guarantees |
 |---|---|---|
-| What a writer may do without asking | `approval` — one recorded approval per writing task | `settings --access full\|scoped\|approval` |
-| Which model answers for a role | The shared role table | `settings --assign architect=codex/gpt-5.6-terra@max` |
-| Which files a task owns | Declared per task, claimed while it runs | `worktree TASK --paths docs,src/lib` |
+| Contract | `task init <id>` → edit → `task check <id>` | Goal, non-goals, decisions, paths, criteria, checks. `check` also **warns** about criteria no check can show, placeholders, code without a type checker or linter, and checks your principles require |
+| Isolation | `worktree <id> --paths src/lib` | A writer gets its own checkout and claims its files; overlaps need a recorded reason |
+| Job | `run packet.json` | Background worker, exact job ID, pinned snapshot, role-bound provider and model |
+| Evidence | `task verify <id> --check <check>` | The check's log and digests are stored; a later edit makes it `STALE` |
+| Review | `run review.json` | A read-only reviewer from the other provider receives the checks already run on its snapshot |
+| Waiting | `wait [job] --timeout-min 40` | Blocks until jobs finish and prints verdicts, gaps and postmortems |
+| Verdict | `task converge <id>` | `PASS`, `FAIL` or `UNKNOWN` per criterion, with scope violations and provenance |
 
-Reading and reviewing are never gated; the access modes differ in what may be changed. A role
-that writes cannot be assigned to a read-only provider, and the refusal happens where the
-choice is made rather than when the job runs.
+## Profiles
 
-## Run a bounded task
+A profile carries the checks and working instructions for one kind of project.
 
-Copy [the example packet](examples/map-task.json) to local storage and set its objective,
-paths and criteria. From the desktop directory:
+| Profile | Required files | `check-project` runs | Live evidence |
+|---|---|---|---|
+| `generic` | — | nothing by default; your contract's checks | — |
+| `obsidian` | `manifest.json`, `package.json` | isolated `npm run build`, `npm test` (JSON report), `npm run lint` | Obsidian CLI against a declared **test** vault; production vaults stay read-only |
 
-```sh
-node claudex/bin/claudex.mjs run .local/map-task.json --wait
-node claudex/bin/claudex.mjs status
-node claudex/bin/claudex.mjs cancel JOB_ID
-```
+Project-specific invariants live in the local `.local/claudex/project-profile.md`, together with
+the working principles recorded by setup.
 
-Without `--wait`, submission returns immediately and a hidden background coordinator runs
-the exact job. Inspect it by ID. `COMPLETED` means the provider returned a valid result;
-`proposedAcceptance` is the model's assessment. The job's acceptance remains `UNKNOWN`
-until independently adjudicated evidence is recorded outside that proposal.
+## Reports
 
-Writing tasks require a separate worktree, and — in the default access mode — an approval:
+| Report | Command | Answers |
+|---|---|---|
+| Job summary | `status --summary` | What is running, what finished, where the postmortem is |
+| Verdicts on completion | `wait [job …]` | Criteria, findings, unanswered criteria (`resultGaps`), termination |
+| Postmortem | `artifacts/<job>/postmortem.json` | What the job promised, where it stopped, the provider's own error, leftovers, next checks |
+| Retrospective | `retro [--since DATE]` | Failure causes, per-model jobs, cost and tokens, share of `UNKNOWN`, slowest runs |
+| Workspace health | `doctor` | Entrypoints, providers, worktrees, claims, delegations, approvals, orphan jobs |
+| Provider handover | `modes --status` / `--debt` | Who answers for whom, and which re-checks are owed |
+| Session handoff | hooks | Project state at session start, a line per stop, finished reports carried into the next turn |
 
-```sh
-node claudex/bin/claudex.mjs worktree implement-one-change --base HEAD --paths src/lib
-node claudex/bin/claudex.mjs approve implement-one-change --reason "Reviewed the plan and its scope"
-```
+## Skills and reference library
 
-Assign the returned path to an `implementer` packet. Claude's managed worker uses confined
-file tools; it does not receive an unrestricted shell. The coordinator runs project checks
-with `check-project`. When the work is finished, retire the checkout through the harness —
-`worktree --retire` detaches shared dependency links before git deletes the directory — and
-see the [command reference](docs/reference/commands.md) for the rest.
+Skills are short, maintained instructions; generated stubs point to them from `.claude/skills`
+and `.agents/skills`.
 
-## What is implemented
-
-| Capability | Boundary |
+| Skill | Use it to |
 |---|---|
-| Shared roles and five focused skills | One maintained body, generated native entrypoints |
-| Structured jobs and common concurrency limit | Managed Claudex jobs; unrelated CLI sessions are outside the scheduler |
-| Pinned source and configuration evidence | Full Git HEAD plus tracked/relevant untracked content hashes |
-| Read-only reviewers | Codex read-only sandbox; Claude restricted file tools; no write escalation |
-| Obsidian evidence capture | Explicit vault identity, local artifacts, test-vault mutation gate |
-| Publication guards | Staged/history secret checks, protected refs, fast-forward and deletion checks |
-| Recovery visibility | Exact job IDs, readiness deadlines, cancellation and orphan diagnosis |
-| Installation window | Project, access mode, providers and per-role models, collected before anything is written |
-| Access modes | `full`, `scoped`, `approval`; one-shot approvals spent by the worker that uses them |
-| Scope claims | Writing tasks declare and claim their files; an overlap needs a recorded reason |
-| Worktree visibility and retirement | Uncommitted work, unfinished merges and shared installs are reported, and links are detached before removal |
-| Recorded provider handover | A quota that ends becomes a delegation with an owed re-check, never a silent substitution |
-| Push journal | Every push through the guard appends a line written by the boundary, not by its author |
+| `spec-workflow` | bind a feature or fix to a contract and current evidence |
+| `task-contract` | hand a bounded question to another agent |
+| `systematic-diagnosis` | find the cause before changing code; read every failing suite's reason |
+| `evidence-gate` | judge a completion claim against evidence |
+| `flow-render` | trace one user action from the visible promise to the persisted effect |
+| `obsidian-acceptance` | plan live checks through the Obsidian CLI |
+| `native-ui-quality` | hold an interface to the iOS quality bar, including Obsidian mobile |
 
-Claudex 0.1.0 is an initial engineering release. It does not claim benchmark superiority,
-perfect secret detection, automatic recovery of orphan processes, or autonomous product
-acceptance. Read [the threat model](SECURITY.md) and the online
-[validation boundaries](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
+`library/` is a local reference of worked solutions — Emil Kowalski's design-engineering skills
+and a distilled Apple Human Interface Guidelines — read on demand through `native-ui-quality`,
+never injected wholesale. See [library/README.md](library/README.md) for provenance and licenses.
+
+## Security
+
+- **Nothing local is published.** Configuration, jobs, evidence, approvals and backups live in
+  `.local/` of your workspace, outside this repository. Credentials stay in the provider CLIs.
+- **Authority is structural.** Codex runs in a read-only sandbox; Claude's managed writer gets
+  confined file tools and no shell; writers need a worktree on a feature branch.
+- **Publication is guarded.** `scan` checks staged content and history for secrets; the push
+  guard refuses protected refs, force pushes and deletions, and journals every push.
+- **Hooks run without a shell.** Installed hooks use exec form, so a path is never a command.
+
+Read the full [threat model](SECURITY.md).
+
+## References
+
+Everything Claudex adapted, borrowed from or evaluated. Details: [lineage](docs/explanation/lineage.md).
+
+| Source | Used for |
+|---|---|
+| [github/spec-kit](https://github.com/github/spec-kit) | the task contract; `task check` warnings follow its `analyze` pass |
+| [obra/superpowers](https://github.com/obra/superpowers) | skills, worktree isolation, test-before-fix |
+| [Graphify](https://github.com/Graphify-Labs/graphify) | vendored code graph (`vendor/graphify`) |
+| [kvyb/prompt-agent](https://github.com/kvyb/prompt-agent) | session scoring → `retro` |
+| [emilkowalski/skills](https://github.com/emilkowalski/skills) | design engineering, motion, web-on-phone (`library/emil`) |
+| [justinwetch/HIGAgentSkills](https://github.com/justinwetch/HIGAgentSkills) | distilled, routed HIG (`library/apple-hig`, local reference) |
+| [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) | the primary source behind the HIG library |
+| [Claude Code hooks](https://code.claude.com/docs/en/hooks) | hook events, exec form, `Bash\|PowerShell` matcher |
+| [TypeSafe agent skill](https://docs.typesafe.ai/agent-skill) | evaluated; not integrated |
 
 ## Documentation
 
-- **Learn:** [architecture and state model](docs/explanation/architecture.md), [lineage, attribution and thanks](docs/explanation/lineage.md).
-- **Install:** [install and adapt](docs/how-to/setup.md).
-- **Operate:** [Obsidian CLI](docs/how-to/obsidian.md), [provider handover](docs/how-to/delegation.md), [migration](docs/how-to/migration.md), [publication](docs/how-to/publication.md), [specification workflow](docs/how-to/spec-workflow.md), [code graph](docs/how-to/graph.md).
-- **Reference:** [commands and contracts](docs/reference/commands.md).
-- **Evaluate:** [research sources](https://github.com/ParkPavel/claudex/blob/main/docs/research/evidence-register.md), [validation](https://github.com/ParkPavel/claudex/blob/main/docs/research/validation.md).
-- **Contribute:** [contribution guide](https://github.com/ParkPavel/claudex/blob/main/CONTRIBUTING.md), [release notes](CHANGELOG.md).
+| | |
+|---|---|
+| **Learn** | [Architecture and state model](docs/explanation/architecture.md) · [Lineage and thanks](docs/explanation/lineage.md) |
+| **Install** | [Install and adapt](docs/how-to/setup.md) |
+| **Operate** | [Specification workflow](docs/how-to/spec-workflow.md) · [Provider handover](docs/how-to/delegation.md) · [Obsidian CLI](docs/how-to/obsidian.md) · [Code graph](docs/how-to/graph.md) · [Publication](docs/how-to/publication.md) · [Migration](docs/how-to/migration.md) |
+| **Reference** | [Commands and contracts](docs/reference/commands.md) · [Release notes](CHANGELOG.md) · [Security](SECURITY.md) |
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Claudex builds on Spec Kit, Superpowers
-and Graphify ([lineage](docs/explanation/lineage.md)); it vendors a patched Graphify under its
-own Apache-2.0/MIT licenses and no third-party skill libraries.
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). `vendor/graphify` keeps its own
+Apache-2.0/MIT licenses; `library/emil` is MIT; `library/apple-hig` declares no license and is
+kept for local reference only.
