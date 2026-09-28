@@ -12,7 +12,7 @@ import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
 import { checkEvidenceFor, validateTaskPacket } from './tasks.mjs';
 import { projectGraph } from './graph.mjs';
-import { previousReview, reviewContext, toolSteps } from './review.mjs';
+import { previousReview, reviewContext, scopedChanges, toolSteps } from './review.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
 export const STOP_RETRY_MS = 5000;
@@ -247,7 +247,12 @@ export async function runWorker(ws,id) {
     const profile = await readJSON(path.join(ROOT,'profiles',`${ws.config.profile}.json`));
     for (const required of profile.requiredFiles) assert(await exists(path.join(repo,required)),`Missing project file ${required}`);
     if (packet.base) job.base = (await git(repo,['rev-parse','--verify',`${packet.base}^{commit}`])).trim();
-    if (packet.mode === 'diff') assert((await git(repo,['diff','--name-only',job.base])).trim(),'Diff review has no changes');
+    // The same scope the prompt shows: tracked changes and new files under the
+    // packet's paths. An empty scope would invite a PASS on "(no changes)".
+    if (packet.mode === 'diff') {
+      const changes = await scopedChanges(repo,job.base,packet.paths);
+      assert(changes.tracked.length + changes.untracked.length,'Diff review has no changes within its paths');
+    }
     job.before = await snapshot(repo);
     job.configurationDigest = await runtimeDigest(ws);
     const adapter = await prepareAdapter(ws,packet,role);
