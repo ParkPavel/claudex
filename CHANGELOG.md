@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 — 2026-09-28
+
+Task contracts, snapshot-bound evidence and a hardened job lifecycle, with setup, hooks and
+documentation for a first stable release. Reviewed across seven cross-model rounds (Codex
+gpt-5.6-sol); the last one found no P1 or P2 defect.
 
 - Lessons from 202 jobs of a working journal: Claude's session and weekly limits are
   classified as QUOTA and a provider's refusal is kept as its own sentence; a result that omits

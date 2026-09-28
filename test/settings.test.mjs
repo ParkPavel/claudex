@@ -12,6 +12,11 @@ import { chooseAssignments, chooseObsidian, frame, projectProblem, runSetup, sum
 
 const roles = () => readJSON(new URL('../config/roles.json', import.meta.url));
 
+// The environment frame is shown first; tests supply it instead of launching CLIs.
+const probe = async () => [{ name:'node', found:true, version:'v22.0.0', problem:null }];
+// Working principles (four answers, defaults kept) and the hooks question follow the roles.
+const PRINCIPLES = ['','','',''];
+
 const scripted = answers => {
   const written = [];
   const queue = [...answers];
@@ -115,10 +120,12 @@ test('the setup window collects a full configuration and shows it back',async t=
   '',                                    // lead: keep the default
   'codex/gpt-5.6-terra@max',             // architect: another provider, model and effort
   'skip',                                // keep every remaining role
+  ...PRINCIPLES,'no',                    // principles, hooks
   'yes',
  ]);
- const choices=await runSetup(io,{root:ws.root,roles:await roles()});
+ const choices=await runSetup(io,{root:ws.root,roles:await roles(),probe});
  assert.equal(choices.project,'project');
+ assert.deepEqual([choices.principles.branch,choices.principles.merge,choices.hooks],['main','person',false]);
  assert.equal(choices.access,'full');
  assert.deepEqual(choices.models,{claude:'opus',codex:'gpt-6-astra'});
  // Only differences from the role default are stored; `high` is already the
@@ -138,9 +145,9 @@ test('the Obsidian profile collects the live vault boundary in the same window',
   'project','obsidian','approval',
   'claude','','codex','',
   'obsidian','OBStests',vaultPath,'yes',
-  'skip','yes',
+  'skip',...PRINCIPLES,'no','yes',
  ]);
- const choices=await runSetup(io,{root:ws.root,roles:await roles()});
+ const choices=await runSetup(io,{root:ws.root,roles:await roles(),probe});
  assert.equal(choices.executables.obsidian,'obsidian');
  assert.deepEqual(choices.obsidian,{vault:'OBStests',vaultPath,testVault:true});
  assert.match(written.join(''),/production vaults stay read-only/);
@@ -172,8 +179,8 @@ test('the setup window says no instead of writing a configuration that cannot wo
 
 test('a declined summary writes nothing',async t=>{
  const ws=await fixture(t);
- const { io }=scripted(['project','generic','approval','claude','','codex','gpt-6-astra','skip','no']);
- assert.equal(await runSetup(io,{root:ws.root,roles:await roles()}),null);
+ const { io }=scripted(['project','generic','approval','claude','','codex','gpt-6-astra','skip',...PRINCIPLES,'no','no']);
+ assert.equal(await runSetup(io,{root:ws.root,roles:await roles(),probe}),null);
 });
 
 test('native role definitions follow the installation, not the shipped table',async t=>{
