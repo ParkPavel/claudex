@@ -113,7 +113,7 @@ read-only review, a changed source digest marks evidence STALE. Writer results i
 new snapshot and still require independent final-state review. Ignored build artifacts need
 their own digest during live acceptance.
 
-`COMPLETED`, `proposedAcceptance` and acceptance are separate fields. Version 0.1.0 captures
+`COMPLETED`, `proposedAcceptance` and acceptance are separate fields. A job captures
 the model proposal but deliberately leaves job acceptance UNKNOWN. The independent final
 decision is recorded in the managed project's acceptance/decision document with artifact
 references. There is no model-controlled command that turns its own claim into product PASS.
