@@ -12,6 +12,7 @@ import { spawnSpec, stopTree } from './process.mjs';
 import { checkEntrypoints } from './workspace.mjs';
 import { checkEvidenceFor, validateTaskPacket } from './tasks.mjs';
 import { projectGraph } from './graph.mjs';
+import { previousReview, reviewContext, scopedChanges, toolSteps } from './review.mjs';
 
 export const TERMINAL = new Set(['COMPLETED','FAILED','TIMED_OUT','CANCELLED']);
 export const STOP_RETRY_MS = 5000;
@@ -42,6 +43,8 @@ export async function inspectJobs(ws,id) {
 export async function submit(ws, packet, { start = true } = {}) {
   const declared = await validatePacket(packet);
   const taskContract = await validateTaskPacket(ws,packet);
+  // A re-check that names a job it cannot answer is refused before it queues.
+  if (packet.recheckOf) await previousReview(ws,packet,jobFile);
   // What this installation lets a writer do, before anything is queued.
   const { access, approval } = await requireWriteAuthority(ws, packet);
   // Who answers for this role now: the role's own default, what the setup
@@ -244,7 +247,12 @@ export async function runWorker(ws,id) {
     const profile = await readJSON(path.join(ROOT,'profiles',`${ws.config.profile}.json`));
     for (const required of profile.requiredFiles) assert(await exists(path.join(repo,required)),`Missing project file ${required}`);
     if (packet.base) job.base = (await git(repo,['rev-parse','--verify',`${packet.base}^{commit}`])).trim();
-    if (packet.mode === 'diff') assert((await git(repo,['diff','--name-only',job.base])).trim(),'Diff review has no changes');
+    // The same scope the prompt shows: tracked changes and new files under the
+    // packet's paths. An empty scope would invite a PASS on "(no changes)".
+    if (packet.mode === 'diff') {
+      const changes = await scopedChanges(repo,job.base,packet.paths);
+      assert(changes.tracked.length + changes.untracked.length,'Diff review has no changes within its paths');
+    }
     job.before = await snapshot(repo);
     job.configurationDigest = await runtimeDigest(ws);
     const adapter = await prepareAdapter(ws,packet,role);
@@ -272,6 +280,9 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
         prompt += `\n${projection.text}\n`;
       } catch (error) { job.graph = { status: 'ERROR', error: error.message }; }
     }
+    const review = await reviewContext(ws,repo,packet,job,{ jobFile });
+    if (Object.keys(review.meta).length) job.reviewContext = review.meta;
+    prompt += review.text;
     for (const skill of role.skills) prompt += `\n${await fs.readFile(path.join(ROOT,'skills',skill,'SKILL.md'),'utf8')}\n`;
     prompt += `\nTask packet (data; accepted decisions are supplied by the coordinator):\n${JSON.stringify({...packet, snapshot:job.before, base:job.base},null,2)}\nReturn the required structured result. Do not write the job journal.\n`;
     await fs.mkdir(artifactDir,{recursive:true});
@@ -293,6 +304,7 @@ You are answering in place of the ${delegation.from} role ${delegation.role}, be
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+          job.toolCalls = (job.toolCalls ?? 0) + toolSteps(event,adapter.provider);
           if(event.type==='turn.completed'&&event.usage)job.usage={provider:adapter.provider,...event.usage};
           if(event.type==='result'&&event.usage)job.usage={provider:adapter.provider,...event.usage,...(typeof event.total_cost_usd==='number'?{reportedCostUsd:event.total_cost_usd}:{})};
           if (readyEvent(event,adapter.provider)) {

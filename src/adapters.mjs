@@ -58,6 +58,13 @@ export async function validatePacket(packet) {
   assert(!(packet.authority === 'workspace-write' && role.authority !== 'workspace-write'), 'Role authority cannot be escalated');
   if (packet.authority === 'workspace-write') assert(packet.worktree, 'A writer requires an assigned worktree');
   if (packet.mode === 'diff') assert(packet.base, 'Diff review requires a base');
+  // A diff or a re-check is scoped: an empty list would silently mean the whole repository.
+  if (packet.mode === 'diff' || packet.recheckOf !== undefined) assert(packet.paths.length, 'A diff review or re-check names the paths it covers');
+  if (packet.recheckOf !== undefined) {
+    assert(typeof packet.recheckOf === 'string' && /^[a-zA-Z0-9_-]+$/.test(packet.recheckOf), 'recheckOf must be a job ID');
+    assert(packet.authority === 'read-only', 'A re-check is a read-only review');
+  }
+  if (packet.budget !== undefined) assert(packet.budget && Number.isInteger(packet.budget.toolCalls) && packet.budget.toolCalls > 0 && packet.budget.toolCalls <= 500 && Object.keys(packet.budget).length === 1, 'budget is { toolCalls: 1..500 }');
   return role;
 }
 /**

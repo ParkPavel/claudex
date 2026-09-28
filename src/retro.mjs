@@ -58,9 +58,12 @@ export async function retro(ws, { since = null } = {}) {
     if (typeof job.usage?.reportedCostUsd === 'number') entry.reportedCostUsd = Math.round((entry.reportedCostUsd + job.usage.reportedCostUsd)*100)/100;
     entry.inputTokens += inputTokens(job.usage);
     entry.outputTokens += Number(job.usage?.output_tokens ?? 0);
-    const role = report.byRole[job.packet?.role ?? '?'] ??= { jobs:0, completed:0 };
+    const role = report.byRole[job.packet?.role ?? '?'] ??= { jobs:0, completed:0, inputTokens:0, measured:0, toolCalls:0 };
     role.jobs++;
     if (job.status === 'COMPLETED') role.completed++;
+    role.inputTokens += inputTokens(job.usage);
+    // Older records have no step count; averages cover the jobs that do.
+    if (typeof job.toolCalls === 'number') { role.measured++; role.toolCalls += job.toolCalls; }
     if (job.delegation) report.delegated++;
     if (job.status === 'COMPLETED') {
       if (job.evidenceFreshness === 'STALE') report.staleEvidence++;
@@ -95,6 +98,10 @@ function attention(r) {
   if (r.causes['timeout: termination unconfirmed']) out.push('A timed-out provider process was not confirmed terminated; check for leftovers before new work.');
   if (r.criteria.unknownShare >= 0.25) out.push(`${Math.round(r.criteria.unknownShare*100)}% of criterion verdicts were UNKNOWN: give reviewers CURRENT check runs through a task contract, or narrow the criteria.`);
   if (r.criteria.gapJobs) out.push(`${r.criteria.gapJobs} completed job(s) left criteria unanswered (resultGaps).`);
+  for (const [name, role] of Object.entries(r.byRole)) {
+    const average = role.measured ? role.toolCalls / role.measured : 0;
+    if (average > 40) out.push(`${name} jobs averaged ${Math.round(average)} tool calls: hand the diff (mode "diff"), answer re-checks with recheckOf, or set budget.toolCalls.`);
+  }
   if (r.staleEvidence) out.push(`${r.staleEvidence} completed job(s) finished STALE: source or configuration changed while they ran, so their verdict describes no single snapshot.`);
   return out;
 }

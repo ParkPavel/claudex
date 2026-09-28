@@ -24,7 +24,7 @@ than inferred from the currently focused application.
 | `status --summary` | Compact states; a failed or timed-out job names its `postmortem.json` |
 | `cancel JOB` | Request cancellation; terminal state follows confirmed closure. A job whose worker and provider child are both gone is closed as `orphaned`; a surviving child is named and left alone |
 | `wait [JOB …] [--timeout-min N]` | Block until the jobs (default: every active one) finish and print their verdicts, gaps and postmortems; exit 2 on timeout. Run it in the background to be woken when a review ends |
-| `retro [--since DATE]` | Journal retrospective: failure causes, per-model jobs, cost and input tokens, UNKNOWN share, unanswered criteria, slowest runs |
+| `retro [--since DATE]` | Journal retrospective: failure causes, per-model jobs, cost and input tokens, per-role tool steps, UNKNOWN share, unanswered criteria, slowest runs |
 | `hook NAME` | Claude Code hook entrypoints (`session-start`, `handoff`, `pre-run`, `report-ready`); read the event on stdin and never block. `report-ready` only notifies the person at Stop — Stop context would continue the conversation — and delivers finished reports with the next prompt (`UserPromptSubmit`), marking a report seen only when its whole block was delivered |
 | `hooks --install` | Merge the Claudex hooks into `.claude/settings.local.json` in exec form (no shell, so a path is never a command; the gate matches `Bash\|PowerShell`), replacing only earlier Claudex hooks and keeping every other hook, even one sharing an entry |
 | `obsidian OP --params JSON [--write]` | Execute a scoped host operation and save evidence |
@@ -41,11 +41,30 @@ than inferred from the currently focused application.
 
 [Example](../../examples/map-task.json). Required fields: `taskId`, `role`, `mode`, `goal`,
 `paths`, `authority`, and nonempty `criteria` with unique IDs. Optional fields include
-`acceptedDecisions`, `exclusions`, `base`, `worktree`, `model` and `effort`.
+`acceptedDecisions`, `exclusions`, `base`, `worktree`, `model`, `effort`, `recheckOf` and
+`budget`.
 
 Modes are `snapshot`, `design`, `diff`, `live` and `eval`. They describe the task; `live`
 does not automatically grant a model access to Obsidian. Host operations remain coordinated.
 `diff` requires a valid base and nonempty comparison. `snapshot` does not.
+
+### Keeping reviews cheap
+
+Every tool step resends the whole conversation, so a review's input grows with the steps it
+takes, not with the files it names. In a working journal the costliest reviews ran 50 to 150
+shell commands, mostly rebuilding a diff the coordinator already had.
+
+- A `diff` job receives its diff against `base`, limited to `paths` and with new untracked
+  files inlined (up to 60 000 characters; beyond that a file list and the start of the diff).
+- `recheckOf: "<job-id>"` answers an earlier completed review of the same checkout. The job
+  receives that review's findings and unpassed criteria and the diff since the commit it
+  started from, and is told to settle each finding and review only what changed. A re-check
+  is read-only and is refused at submission if the earlier job is missing, not completed or
+  reviewed another checkout.
+- `budget: { "toolCalls": N }` sets the step budget stated to the model (defaults: 20 for a
+  re-check, 40 for a diff review). It guides; it does not stop a job, because a verdict cut
+  off mid-way is worth less than a long one. A criterion the budget cannot settle is UNKNOWN.
+- Each job records `toolCalls`, and `retro` flags a role whose jobs average more than 40.
 
 `paths` describes task scope and is checked for path escape. It is not an operating-system
 write allowlist. A writing worker is confined to its worktree by the provider's restricted

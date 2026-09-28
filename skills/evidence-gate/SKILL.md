@@ -20,6 +20,10 @@ that cannot run in a read-only sandbox (EPERM, missing network) is UNKNOWN from 
 not FAIL, and does not override a CURRENT run. A job that answered only some criteria records
 the rest as UNKNOWN with the reason; read `resultGaps` before treating its verdict as whole.
 
+A re-check (`recheckOf`) settles each previous finding as FIXED or NOT FIXED and reviews only
+the changes it was handed; do not re-review untouched code, and state UNKNOWN rather than
+exceed the step budget.
+
 Verify reported findings against source before accepting them. Record rejected findings with
 reasons. Read canonical budgets at their source rather than copying numbers into instructions.
 Evidence files remain local. A model's proposed PASS still needs independent adjudication.

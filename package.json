@@ -1,6 +1,6 @@
 {
   "name": "claudex",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A shared workspace harness for Claude Code, Codex and evidence-driven Obsidian development.",
   "type": "module",
   "private": true,
