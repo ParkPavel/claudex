@@ -17,6 +17,7 @@ import { inspectAll, retire } from '../src/worktrees.mjs';
 import { mergePrinciples, principlesSection, runSetup } from '../src/setup.mjs';
 import { validateConfig } from '../src/config.mjs';
 import { installHooks, runHook } from '../src/hooks.mjs';
+import { retro } from '../src/retro.mjs';
 
 function args(input) {
   const out={_:[]};
@@ -70,6 +71,7 @@ modes --delegate codex:claude --reason <text> [--roles a,b] [--model <id>]
 modes --unavailable <provider> --reason <text> | --restore <provider> [--note <text>]
 modes --settle <delegation-id> --evidence <ref[,ref]>
 check-project                          Run the selected profile checks
+retro [--since <date>]                 Journal retrospective: failure causes, models, costs, UNKNOWN share
 graph build [--code-only] | graph relink | graph trace | graph status  Build the project's code graph (vendored Graphify) or check it is current
 graph query|path|explain|affected|god-nodes <args>  Navigate the linked graph
 hook <session-start|handoff|pre-run|report-ready>  Claude Code hook entrypoints (read the event on stdin; never block)
@@ -221,6 +223,7 @@ State, evidence and credentials never belong in the public repository.`);
       print(result);
     }
     else if(command==='cancel')print(await cancel(ws,options._[1]));
+    else if(command==='retro')print(await retro(ws,{since:text(options.since)}));
     else if(command==='hooks') {
       assert(options.install===true,'Use hooks --install');
       print(await installHooks(ws));
