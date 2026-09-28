@@ -152,18 +152,25 @@ const sessionDir = ws => path.join(ws.state,'reports','seen');
 const sessionFile = (ws, session) => path.join(sessionDir(ws), `${/^[\w-]{1,80}$/.test(session) ? session : crypto.createHash('sha256').update(session).digest('hex').slice(0,32)}.json`);
 async function readSeen(ws, session) {
   // An earlier version kept one list for the whole workspace; it still counts for every session.
+  // Both earlier shapes count: a plain list, and an object of lists keyed by session.
   const legacy = await quiet(() => readJSON(seenFile(ws)));
+  const earlier = Array.isArray(legacy) ? legacy : Object.values(legacy ?? {}).filter(Array.isArray).flat();
   const own = await quiet(() => readJSON(sessionFile(ws,session)));
-  return new Set([...(Array.isArray(legacy) ? legacy : []), ...(Array.isArray(own) ? own : [])]);
+  return new Set([...earlier, ...(Array.isArray(own) ? own : [])]);
 }
 async function writeSeen(ws, session, seen, jobs, now) {
   const fresh = new Set(jobs.filter(job => !(now - Date.parse(job.updated ?? job.created ?? 0) > FRESH_MS)).map(job => job.id));
   await fs.mkdir(sessionDir(ws),{recursive:true});
   await atomicJSON(sessionFile(ws,session),[...seen].filter(id => fresh.has(id)));
+  const own = path.basename(sessionFile(ws,session));
   for (const name of await quiet(() => fs.readdir(sessionDir(ws))) ?? []) {
+    if (name === own) continue;
     const file = path.join(sessionDir(ws),name);
-    const stat = await quiet(() => fs.stat(file));
-    if (stat && now - stat.mtimeMs > SESSION_TTL_MS) await quiet(() => fs.rm(file,{force:true}));
+    const stale = async () => { const stat = await quiet(() => fs.stat(file)); return stat && now - stat.mtimeMs > SESSION_TTL_MS; };
+    // Checked twice, the second time just before removal: a session that
+    // rewrote its file in between keeps it. The window left costs at most one
+    // repeated report, never a lost one.
+    if (await stale() && await stale()) await quiet(() => fs.rm(file,{force:true}));
   }
 }
 export async function reportReady(ws, { now = Date.now(), event = 'UserPromptSubmit', session = 'default' } = {}) {

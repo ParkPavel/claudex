@@ -136,6 +136,15 @@ test('an earlier workspace-wide ledger still counts, and a cut report keeps its 
   assert.ok(text.length<=2000,String(text.length));
 });
 
+test('a ledger keyed by session, from an earlier version, still counts',async t=>{
+  const ws=await fixture(t);
+  const now=Date.parse('2026-09-28T12:00:00Z');
+  await fs.mkdir(path.join(ws.state,'reports'),{recursive:true});
+  await atomicJSON(path.join(ws.state,'reports','.reported-jobs.json'),{A:['j1']});
+  await atomicJSON(jobFile(ws,'j1'),{id:'j1',taskId:'t1',status:'FAILED',updated:'2026-09-28T11:00:00Z',error:'x'});
+  assert.equal(await reportReady(ws,{now,session:'A'}),null);
+});
+
 test('sessions keep separate ledgers holding only fresh IDs, and abandoned ones are removed',async t=>{
   const ws=await fixture(t);
   const now=Date.now();
