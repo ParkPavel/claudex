@@ -17,7 +17,7 @@ Point Claudex at that environment's Python in local `workspace.json`:
 
 ```json
 "graph": {
-  "python": "C:/Users/<you>/AppData/Roaming/uv/tools/graphifyy/Scripts/python.exe",
+  "python": "<uv tools dir>/graphifyy/Scripts/python.exe",
   "backend": "claude-cli",
   "model": "sonnet",
   "excludes": ["demo-vault", "templates", "translations"]

@@ -14,8 +14,15 @@ export function inspectBlob(file, bytes) {
   const findings = [];
   if (forbiddenPath.test(file)) findings.push({ file, kind: 'private-path' });
   if (bytes.includes(0)) return findings;
+  // Vendored third-party code documents path handling with its authors' own
+  // illustrative user-home paths; they describe no machine
+  // of ours. Only the path rule is skipped there; every secret rule still runs.
+  const vendored = /^vendor\//.test(file);
   bytes.toString('utf8').split(/\r?\n/).forEach((line, i) => {
-    for (const [kind, pattern] of rules) if (pattern.test(line)) findings.push({ file, line: i + 1, kind });
+    for (const [kind, pattern] of rules) {
+      if (vendored && kind === 'private-machine-path') continue;
+      if (pattern.test(line)) findings.push({ file, line: i + 1, kind });
+    }
   });
   return findings;
 }
