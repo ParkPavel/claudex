@@ -16,6 +16,14 @@ persistence or review. Tasks map to criteria and declare dependencies; checks de
 command, argument array and criterion IDs. Expand into a separate design or plan only when
 the decisions need it. Run `task check <id>` before implementation or delegation.
 
+`task check` also returns warnings: criteria no check can measure, leftover TODO/TBD, duplicate
+or uncovered criteria, code in scope without a type checker or linter, and checks the working
+principles in the project profile require but the contract never runs. Resolve each or record
+in decisions why it does not apply. Before implementation, list what only the person can
+decide (scope, trade-offs, behaviour the goal leaves open) and record the answers as decisions;
+a subagent cannot obtain consent, and an unresolved decision skips its task instead of
+stopping the queue.
+
 For writing jobs, set `contractId` to that task ID, bind the same worktree, use a subset of
 its paths and criterion IDs. Job taskId identifies a particular bounded assignment, not
 necessarily the whole contract. The local `workflow.requireContract` setting enforces this

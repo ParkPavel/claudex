@@ -14,6 +14,12 @@ screenshot establishes appearance; a successful response establishes transport; 
 requires readback at the intended boundary. Bind deployed bundle and tested app state when
 the claim concerns the running product.
 
+A reviewer bound to a task contract receives the coordinator's check runs. Use a CURRENT run
+as the automated evidence for its criteria; a STALE one describes another snapshot. A check
+that cannot run in a read-only sandbox (EPERM, missing network) is UNKNOWN from that sandbox,
+not FAIL, and does not override a CURRENT run. A job that answered only some criteria records
+the rest as UNKNOWN with the reason; read `resultGaps` before treating its verdict as whole.
+
 Verify reported findings against source before accepting them. Record rejected findings with
 reasons. Read canonical budgets at their source rather than copying numbers into instructions.
 Evidence files remain local. A model's proposed PASS still needs independent adjudication.
