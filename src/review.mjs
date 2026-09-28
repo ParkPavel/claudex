@@ -48,9 +48,13 @@ async function diffSince(repo, base, paths) {
   if (body.length <= DIFF_LIMIT) return { text: body, chars: body.length, truncated: false, files: tracked.length + untracked.length, untracked: untracked.length };
   // Cut: every changed name survives (up to a bounded list), and the whole stays under the cap.
   const names = [...tracked.map(f => `M ${f}`), ...untracked.map(f => `? ${f}`)];
-  let list = `Changed files (${names.length}; M tracked, ? untracked):\n${names.slice(0, LIST_LIMIT).join('\n')}${names.length > LIST_LIMIT ? `\n… ${names.length - LIST_LIMIT} more; list them with git diff --name-only and git ls-files --others` : ''}`;
-  // The list itself is bounded too: never more than half the cap, so the whole stays under it.
-  if (list.length > DIFF_LIMIT / 2) list = `${list.slice(0, DIFF_LIMIT / 2)}\n… file list cut`;
+  // The list is bounded (count and size, never more than half the cap); what
+  // it leaves out is always stated, with how to list it, after any cut.
+  let shown = names.slice(0, LIST_LIMIT).join('\n');
+  if (shown.length > DIFF_LIMIT / 2) shown = shown.slice(0, DIFF_LIMIT / 2).replace(/\n[^\n]*$/, '');
+  const listed = shown ? shown.split('\n').length : 0;
+  const rest = names.length - listed;
+  const list = `Changed files (${names.length}; M tracked, ? untracked):\n${shown}${rest ? `\n… ${rest} more not listed here; list them all with: git diff --name-only ${base} -- <paths> and git ls-files --others --exclude-standard -- <paths>` : ''}`;
   const note = `\n… diff cut at ${DIFF_LIMIT} characters; open the listed files the cut part covers.`;
   const room = Math.max(0, DIFF_LIMIT - list.length - note.length - 2);
   const text = `${list}\n\n${body.slice(0, room)}${note}`;
@@ -82,6 +86,11 @@ export async function previousReview(ws, packet, jobFile, repo = null) {
   const result = prior.artifactDirectory ? await readJSON(path.join(prior.artifactDirectory, 'result.json')).catch(() => null) : null;
   assert(result, `The previous review's result is missing; re-review instead of re-checking`);
   const owed = (result.criteria ?? []).filter(c => c.status !== 'PASS').map(c => c.id);
+  // The scope cannot narrow: every path the review covered is covered again.
+  const norm = p => p.replaceAll('\\', '/').replace(/\/+$/, '');
+  const covers = (scope, p) => scope.some(s => norm(p) === norm(s) || norm(p).startsWith(`${norm(s)}/`));
+  const narrowed = (prior.packet?.paths ?? []).filter(p => !covers(packet.paths ?? [], p));
+  assert(!narrowed.length, `A re-check covers every path the previous review covered: ${narrowed.join(', ')}`);
   // Carried with the same wording: a softened criterion is a dropped one.
   const carried = new Map((packet.criteria ?? []).map(c => [c.id, c.text]));
   const before = new Map((prior.packet?.criteria ?? []).map(c => [c.id, c.text]));

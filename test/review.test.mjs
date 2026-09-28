@@ -138,6 +138,17 @@ test('a re-check keeps the reviewing role and the exact wording of what it owes'
   await assert.rejects(reviewContext(ws,repo,{...reviewer,role:'tester',recheckOf:'owed'},{base},{jobFile}),/role that reviewed: auditor/);
   await assert.rejects(reviewContext(ws,repo,{...reviewer,criteria:[{id:'sum',text:'sum mostly adds'}],recheckOf:'owed'},{base},{jobFile}),/unchanged: sum/);
   assert.equal((await reviewContext(ws,repo,{...reviewer,recheckOf:'owed'},{base},{jobFile})).meta.recheckOf,'owed');
+  await assert.rejects(reviewContext(ws,repo,{...reviewer,paths:['src/sum.mjs'],recheckOf:'owed'},{base},{jobFile}),/covers every path the previous review covered: src/);
+  assert.equal((await reviewContext(ws,repo,{...reviewer,paths:['src','README.md'],recheckOf:'owed'},{base},{jobFile})).meta.recheckOf,'owed','a wider scope is allowed');
+});
+
+test('a list longer than it may show says how many it left out and how to list them',async t=>{
+  const {ws,repo,base}=await fixture(t);
+  await fs.writeFile(path.join(repo,'src','sum.mjs'),'x'.repeat(DIFF_LIMIT)+'\n');
+  for(let i=0;i<230;i++)await fs.writeFile(path.join(repo,'src',`f${i}.mjs`),'1\n');
+  const {text,meta}=await reviewContext(ws,repo,reviewer,{base},{jobFile});
+  assert.match(text,/… 31 more not listed here; list them all with: git diff --name-only/);
+  assert.ok(meta.diffChars<=DIFF_LIMIT);
 });
 
 test('tool steps are counted from both providers\' event streams',()=>{
