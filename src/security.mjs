@@ -8,7 +8,8 @@ const rules = [
   ['github-credential', /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b/],
   ['provider-credential', /\bsk-(?:ant-[A-Za-z0-9_-]{25,}|[A-Za-z0-9_-]{32,})\b/],
   ['credential-literal', /(?:api[_-]?key|access[_-]?token|password|secret)\s*["']?\s*[:=]\s*["'][A-Za-z0-9+/_=-]{24,}["']/i],
-  ['private-machine-path', /(?:[A-Z]:[\\/]Users[\\/][^\s/\\"']+|\/(?:Users|home)\/[a-zA-Z0-9._-]+\/)/],
+  // A user segment in angle brackets ("<you>") is a documentation placeholder, not a machine.
+  ['private-machine-path', /(?:[A-Z]:[\\/]Users[\\/](?!<)[^\s/\\"']+|\/(?:Users|home)\/[a-zA-Z0-9._-]+\/)/],
 ];
 export function inspectBlob(file, bytes) {
   const findings = [];

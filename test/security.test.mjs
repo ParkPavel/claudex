@@ -71,6 +71,7 @@ const kinds = (file, text) => inspectBlob(file, Buffer.from(text)).map(f => f.ki
 test('a machine path is flagged in our files, not in vendored examples',()=>{
   assert.deepEqual(kinds('docs/a.md',`python: ${home}/tools/python.exe`),['private-machine-path']);
   assert.deepEqual(kinds('vendor/lib/paths.py',`# Path("${home}") on POSIX keeps "C:"`),[]);
+  assert.deepEqual(kinds('docs/graph.md',`"python": "${['C:','Users','<you>'].join('/')}/tools/python.exe"`),[],'a placeholder is not a machine');
 });
 
 test('secrets are flagged everywhere, vendored code included',()=>{
