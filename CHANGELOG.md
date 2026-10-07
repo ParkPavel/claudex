@@ -1,5 +1,15 @@
 # Changelog
 
+## Archived — 2026-10-07
+
+Claudex is done: cooked well done, browned and lowered into the pot. Its ideas continue as an
+ingredient of [Borshkit](https://github.com/ParkPavel/borshkit). No further versions; 1.1.0 is the
+last release. The reasons, criterion by criterion: [ARCHIVED.md](ARCHIVED.md) ·
+[ARCHIVED.ru.md](ARCHIVED.ru.md).
+
+- README, contributing and security notes point to Borshkit; `claudex help` and `setup` say so too.
+- The release archive carries the archive notice.
+
 ## 1.1.0 — 2026-09-29
 
 Cheaper reviews, from where a working journal showed the tokens going: tool steps, not files.

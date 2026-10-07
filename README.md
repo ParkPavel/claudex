@@ -1,3 +1,9 @@
+> [!WARNING]
+> **Archived.** Claudex was cooked well done and went into the pot as an ingredient of
+> the borshch — **[Borshkit](https://github.com/ParkPavel/borshkit)**. This repository is
+> read-only; 1.1.0 is the last version. Why the meat went into the soup:
+> [review of the reasons for archiving](ARCHIVED.md).
+
 <div align="center">
 
 # Claudex
@@ -6,6 +12,7 @@
 
 **English** · [Русский](README.ru.md)
 
+[![Status: archived → Borshkit](https://img.shields.io/badge/status-archived%20%E2%86%92%20borshkit-b3261e.svg)](ARCHIVED.md)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js ≥ 22](https://img.shields.io/badge/node-%E2%89%A5%2022-339933?logo=node.js&logoColor=white)](package.json)
 [![Runtime dependencies: none](https://img.shields.io/badge/runtime%20deps-none-brightgreen.svg)](package.json)
@@ -32,6 +39,9 @@ source snapshot, and keeps a model's *"done"* apart from verified acceptance.
 [References](#references) · [Documentation](#documentation)
 
 ## Quick start
+
+*Starting something new? Go straight to [Borshkit](https://github.com/ParkPavel/borshkit) —
+what follows is kept for existing installations.*
 
 Requirements: Node.js 22+, Git, and logged-in Claude Code and Codex CLIs. The managed project is
 its own Git repository next to `claudex/`.

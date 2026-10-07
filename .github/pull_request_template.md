@@ -1,3 +1,6 @@
+> Claudex is archived ([why](../ARCHIVED.md)) and no longer accepts pull requests. Please open
+> yours in [Borshkit](https://github.com/ParkPavel/borshkit).
+
 ## Problem and resulting behavior
 
 Describe the trigger and observable outcome.

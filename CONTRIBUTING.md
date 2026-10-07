@@ -1,5 +1,9 @@
 # Contributing
 
+> **Closed for contributions.** Claudex is archived and went into the borshch — see
+> [ARCHIVED.md](ARCHIVED.md). Bring ideas, issues and pull requests to
+> [Borshkit](https://github.com/ParkPavel/borshkit) instead. The notes below are kept for history.
+
 Start with a concrete failure, desired behavior and boundary. Changes to orchestration need
 a deterministic regression case or a documented reason that a live evaluation is required.
 Keep source-derived claims separate from architectural judgment.
