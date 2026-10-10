@@ -1,3 +1,9 @@
+> [!WARNING]
+> **В архиве.** Клаудекс прожарили до *well done* и отправили в кастрюлю ингредиентом
+> борща — **[Borshkit (Борщкит)](https://github.com/ParkPavel/borshkit)**. Репозиторий только
+> для чтения, 1.1.0 — последняя версия. Почему мясо ушло в суп:
+> [ревью причин архивации](ARCHIVED.ru.md).
+
 <div align="center">
 
 # Клаудекс
@@ -6,6 +12,7 @@
 
 [English](README.md) · **Русский**
 
+[![Статус: в архиве → Borshkit](https://img.shields.io/badge/status-archived%20%E2%86%92%20borshkit-b3261e.svg)](ARCHIVED.ru.md)
 [![Лицензия: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js ≥ 22](https://img.shields.io/badge/node-%E2%89%A5%2022-339933?logo=node.js&logoColor=white)](package.json)
 [![Runtime-зависимостей нет](https://img.shields.io/badge/runtime%20deps-none-brightgreen.svg)](package.json)
@@ -33,6 +40,9 @@
 [Источники](#источники) · [Документация](#документация)
 
 ## Быстрый старт
+
+*Начинаете новое? Сразу в [Borshkit](https://github.com/ParkPavel/borshkit) — всё ниже
+сохранено для существующих установок.*
 
 Нужны Node.js 22+, Git и авторизованные CLI Claude Code и Codex. Управляемый проект — отдельный
 Git-репозиторий рядом с `claudex/`.

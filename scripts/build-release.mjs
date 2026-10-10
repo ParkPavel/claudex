@@ -39,7 +39,7 @@ try {
     'bin/claudex.mjs', 'config/core.md', 'config/roles.json',
     'profiles/generic.json', 'skills/task-contract/SKILL.md',
     'examples/map-task.json', 'setup.cmd', 'setup.sh',
-    'README.md', 'README.ru.md', 'LICENSE',
+    'README.md', 'README.ru.md', 'ARCHIVED.md', 'ARCHIVED.ru.md', 'LICENSE',
   ];
   const excluded = ['test', 'scripts', 'docs/research', '.github', '.githooks', 'package-lock.json'];
   for (const relative of required) await fs.access(path.join(packaged, relative));

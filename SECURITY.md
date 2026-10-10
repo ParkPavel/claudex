@@ -1,5 +1,9 @@
 # Security model
 
+> **No longer supported.** Claudex is archived ([why](ARCHIVED.md)); 1.1.0, the last version,
+> receives no fixes, security ones included. Report vulnerabilities to
+> [Borshkit](https://github.com/ParkPavel/borshkit) and move installations there.
+
 Claudex protects a publication boundary and constrains its managed workers. It is not a
 general-purpose operating-system sandbox and does not establish trust in downloaded code.
 

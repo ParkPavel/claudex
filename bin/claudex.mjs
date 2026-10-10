@@ -36,6 +36,7 @@ const list=value=>(value&&value!==true?String(value).split(',').map(item=>item.t
 const version=(await readJSON(path.join(ROOT,'package.json'))).version;
 // A window is only opened where a person can answer it; everywhere else the same
 // state is printed once, so a script never blocks on a prompt.
+const archived='Claudex is archived: it went into the borshch. Continue with Borshkit: https://github.com/ParkPavel/borshkit';
 const interactiveTerminal=()=>Boolean(process.stdin.isTTY&&process.stdout.isTTY);
 async function terminalIO(fn) {
   const readline=await import('node:readline/promises');
@@ -46,6 +47,7 @@ async function terminalIO(fn) {
 try {
   if(command==='help') {
     console.log(`Claudex ${version}
+${archived}
 
 setup [--workspace <desktop>]          Open the installation window and write the configuration
 init --workspace <desktop> --project <folder> [--profile <name>] [--access full|scoped|approval]
@@ -83,6 +85,7 @@ guard commit|push                      Git hook entrypoints
 Use --workspace <desktop> from outside the workspace.
 State, evidence and credentials never belong in the public repository.`);
   } else if(command==='setup') {
+    console.error(archived);
     const root=path.resolve(text(options.workspace,process.cwd()));
     assert(interactiveTerminal(),'The setup window needs a terminal. Use init with explicit flags in a script.');
     const existing=await resolveWorkspace(root).catch(()=>null);
